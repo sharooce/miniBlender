@@ -1,0 +1,232 @@
+package com.miniblender.editor;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class EditorObject {
+    public String name;
+    public MeshModel mesh;
+    public float offsetX = 0.0f;
+    public float offsetY = 0.0f;
+    public float offsetZ = 0.0f;
+    public float rotX = 0.0f;
+    public float rotY = 0.0f;
+    public float rotZ = 0.0f;
+    public int selectedVertexIndex = 0;
+    public int textureId = -1;
+    public String texturePath = ""; 
+
+    public EditorObject(String name) {
+        this.name = name;
+        this.mesh = new MeshModel();
+    }
+
+    // Constructor kosong untuk penciptaan dinamis saat load JSON
+    public EditorObject() {
+        this.name = "Object";
+        this.mesh = new MeshModel();
+    }
+
+    // ==========================================
+    // 1. FUNGSI SIMPAN OBJECT KE JSONOBJECT
+    // ==========================================
+    public JSONObject toJSONObject() throws Exception {
+        JSONObject root = new JSONObject();
+
+        // A. Simpan Atribut & Transformasi EditorObject
+        root.put("name", name);
+        root.put("offsetX", (double) offsetX);
+        root.put("offsetY", (double) offsetY);
+        root.put("offsetZ", (double) offsetZ);
+        root.put("rotX", (double) rotX);
+        root.put("rotY", (double) rotY);
+        root.put("rotZ", (double) rotZ);
+        root.put("selectedVertexIndex", selectedVertexIndex);
+        root.put("texturePath", texturePath);
+
+        // B. Simpan Mesh Vertices (v)
+        JSONArray vArray = new JSONArray();
+        for (float[] v : mesh.vertices) {
+            JSONArray item = new JSONArray();
+            item.put((double) v[0]);
+            item.put((double) v[1]);
+            item.put((double) v[2]);
+            vArray.put(item);
+        }
+        root.put("vertices", vArray);
+
+        // C. Simpan UV Texture Coordinates (vt)
+        JSONArray vtArray = new JSONArray();
+        for (float[] vt : mesh.texCoords) {
+            JSONArray item = new JSONArray();
+            item.put((double) vt[0]);
+            item.put((double) vt[1]);
+            vtArray.put(item);
+        }
+        root.put("texCoords", vtArray);
+
+        // D. Simpan Normals (vn)
+        JSONArray vnArray = new JSONArray();
+        for (float[] vn : mesh.normals) {
+            JSONArray item = new JSONArray();
+            item.put((double) vn[0]);
+            item.put((double) vn[1]);
+            item.put((double) vn[2]);
+            vnArray.put(item);
+        }
+        root.put("normals", vnArray);
+
+        // E. Simpan Triangles (f - vertex indices)
+        JSONArray fArray = new JSONArray();
+        for (int[] tri : mesh.triangles) {
+            JSONArray item = new JSONArray();
+            item.put(tri[0]);
+            item.put(tri[1]);
+            item.put(tri[2]);
+            fArray.put(item);
+        }
+        root.put("triangles", fArray);
+
+        // F. Simpan UV Triangles
+        JSONArray uvFArray = new JSONArray();
+        for (int[] uvTri : mesh.uvTriangles) {
+            JSONArray item = new JSONArray();
+            item.put(uvTri[0]);
+            item.put(uvTri[1]);
+            item.put(uvTri[2]);
+            uvFArray.put(item);
+        }
+        root.put("uvTriangles", uvFArray);
+
+        // G. Simpan Normal Triangles
+        JSONArray normFArray = new JSONArray();
+        for (int[] normTri : mesh.normalTriangles) {
+            JSONArray item = new JSONArray();
+            item.put(normTri[0]);
+            item.put(normTri[1]);
+            item.put(normTri[2]);
+            normFArray.put(item);
+        }
+        root.put("normalTriangles", normFArray);
+
+        // H. Simpan Status Winding Mode Aktif
+        root.put("isCCWMode", mesh.isCCWMode);
+
+        return root;
+    }
+
+    // ==========================================
+    // 2. FUNGSI MUAT OBJECT DARI JSONOBJECT
+    // ==========================================
+    public void fromJSONObject(JSONObject root) throws Exception {
+        mesh.vertices.clear();
+        mesh.texCoords.clear();
+        mesh.normals.clear();
+        mesh.triangles.clear();
+        mesh.uvTriangles.clear();
+        mesh.normalTriangles.clear();
+
+        // A. Restore Atribut & Transformasi EditorObject
+        this.name = root.optString("name", "Object");
+        this.offsetX = (float) root.optDouble("offsetX", 0.0);
+        this.offsetY = (float) root.optDouble("offsetY", 0.0);
+        this.offsetZ = (float) root.optDouble("offsetZ", 0.0);
+        this.rotX = (float) root.optDouble("rotX", 0.0);
+        this.rotY = (float) root.optDouble("rotY", 0.0);
+        this.rotZ = (float) root.optDouble("rotZ", 0.0);
+        this.selectedVertexIndex = root.optInt("selectedVertexIndex", 0);
+        this.texturePath = root.optString("texturePath", "");
+
+        // B. Baca Vertices
+        if (root.has("vertices")) {
+            JSONArray vArray = root.getJSONArray("vertices");
+            for (int i = 0; i < vArray.length(); i++) {
+                JSONArray item = vArray.getJSONArray(i);
+                mesh.vertices.add(new float[]{
+									  (float) item.getDouble(0),
+									  (float) item.getDouble(1),
+									  (float) item.getDouble(2)
+								  });
+            }
+        }
+
+        // C. Baca UV Coordinates
+        if (root.has("texCoords")) {
+            JSONArray vtArray = root.getJSONArray("texCoords");
+            for (int i = 0; i < vtArray.length(); i++) {
+                JSONArray item = vtArray.getJSONArray(i);
+                mesh.texCoords.add(new float[]{
+									   (float) item.getDouble(0),
+									   (float) item.getDouble(1)
+								   });
+            }
+        }
+
+        // D. Baca Normals (vn)
+        if (root.has("normals")) {
+            JSONArray vnArray = root.getJSONArray("normals");
+            for (int i = 0; i < vnArray.length(); i++) {
+                JSONArray item = vnArray.getJSONArray(i);
+                mesh.normals.add(new float[]{
+									 (float) item.getDouble(0),
+									 (float) item.getDouble(1),
+									 (float) item.getDouble(2)
+								 });
+            }
+        }
+
+        // E. Baca Vertex Triangles
+        if (root.has("triangles")) {
+            JSONArray fArray = root.getJSONArray("triangles");
+            for (int i = 0; i < fArray.length(); i++) {
+                JSONArray item = fArray.getJSONArray(i);
+                mesh.triangles.add(new int[]{
+									   item.getInt(0),
+									   item.getInt(1),
+									   item.getInt(2)
+								   });
+            }
+        }
+
+        // F. Baca UV Triangles
+        if (root.has("uvTriangles")) {
+            JSONArray uvFArray = root.getJSONArray("uvTriangles");
+            for (int i = 0; i < uvFArray.length(); i++) {
+                JSONArray item = uvFArray.getJSONArray(i);
+                mesh.uvTriangles.add(new int[]{
+										 item.getInt(0),
+										 item.getInt(1),
+										 item.getInt(2)
+									 });
+            }
+        }
+
+        // G. Baca Normal Triangles
+        if (root.has("normalTriangles")) {
+            JSONArray normFArray = root.getJSONArray("normalTriangles");
+            for (int i = 0; i < normFArray.length(); i++) {
+                JSONArray item = normFArray.getJSONArray(i);
+                mesh.normalTriangles.add(new int[]{
+											 item.getInt(0),
+											 item.getInt(1),
+											 item.getInt(2)
+										 });
+            }
+        }
+
+        // H. Restore Winding Mode
+        if (root.has("isCCWMode")) {
+            mesh.isCCWMode = root.getBoolean("isCCWMode");
+        }
+
+        if (mesh.texCoords.isEmpty()) {
+            for (int i = 0; i < mesh.vertices.size(); i++) mesh.texCoords.add(new float[]{0.5f, 0.5f});
+        }
+        if (mesh.normals.isEmpty()) {
+            mesh.recalculateNormals();
+        }
+
+        mesh.updateBuffers();
+    }
+}
+

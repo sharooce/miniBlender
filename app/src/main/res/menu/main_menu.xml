@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/action_load_model"
+        android:title="Open Model (.3d / .mdl / .obj)"/>
+
+    <item
+        android:id="@+id/action_load_texture"
+        android:title="+ Load Tekstur (PNG/JPG)"/>
+
+    <item
+        android:id="@+id/action_save_3d"
+        android:title="Simpan Format (.3d PyS60)"/>
+
+    <item
+        android:id="@+id/action_save_mdl"
+        android:title="Simpan Format (.mdl PyS60)"/>
+
+    <item
+        android:id="@+id/action_save_obj"
+        android:title="Simpan Format (.obj Standard)"/>
+
+</menu>
