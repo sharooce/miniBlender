@@ -289,7 +289,6 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 
             float[] scratchModelMatrix = new float[16];
             float[] tempMatrix = new float[16];
-
             System.arraycopy(roomMatrix, 0, scratchModelMatrix, 0, 16);
             android.opengl.Matrix.scaleM(scratchModelMatrix, 0, scaleFactor, scaleFactor, scaleFactor);
 
@@ -307,50 +306,65 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 
     // PASANG TEKSTUR HANYA KE OBJEK YANG SEDANG AKTIF
 	public void loadTextureForActiveObject(final Bitmap srcBitmap, final String texturePath) {
-		EditorObject active = getActiveObject();
-		if (active == null || srcBitmap == null || srcBitmap.isRecycled()) return;
+        EditorObject active = getActiveObject();
+        if (active == null) return;
 
-		if (texturePath != null) {
-			active.texturePath = texturePath;
-		}
+        if (texturePath != null) {
+            active.texturePath = texturePath;
+        }
 
-		// Pastikan bitmap berformat ARGB_8888
-		Bitmap argbBmp = srcBitmap.copy(Bitmap.Config.ARGB_8888, true);
+        if (srcBitmap == null || srcBitmap.isRecycled()) {
+            android.util.Log.e("MiniBlenderTex", "Gagal memuat bitmap: Bitmap null atau sudah direcycle!");
+            return;
+        }
 
-		// Flip vertikal bitmap agar sesuai dengan sistem koordinat UV OpenGL
-		android.graphics.Matrix matrix = new android.graphics.Matrix();
-		matrix.postScale(1.0f, -1.0f);
-		final Bitmap flippedBitmap = Bitmap.createBitmap(
-			argbBmp, 0, 0, argbBmp.getWidth(), argbBmp.getHeight(), matrix, true
-		);
-		if (argbBmp != srcBitmap) argbBmp.recycle();
+        android.util.Log.i("MiniBlenderTex", "Memuat tekstur: " + srcBitmap.getWidth() + "x" + srcBitmap.getHeight());
 
-		int[] textureHandles = new int[1];
-		GLES20.glGenTextures(1, textureHandles, 0);
+        // Konversi ke ARGB_8888 agar aman dibaca OpenGL
+        Bitmap argbBmp = srcBitmap.copy(Bitmap.Config.ARGB_8888, true);
 
-		if (textureHandles[0] != 0) {
-			if (active.textureId > 0) {
-				GLES20.glDeleteTextures(1, new int[]{active.textureId}, 0);
-			}
-			active.textureId = textureHandles[0];
+        // Flip vertikal bitmap agar sesuai dengan koordinat UV OpenGL
+        android.graphics.Matrix matrix = new android.graphics.Matrix();
+        matrix.postScale(1.0f, -1.0f);
+        final Bitmap flippedBitmap = Bitmap.createBitmap(
+            argbBmp, 0, 0, argbBmp.getWidth(), argbBmp.getHeight(), matrix, true
+        );
+        if (argbBmp != srcBitmap) argbBmp.recycle();
 
-			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, active.textureId);
+        int[] textureHandles = new int[1];
+        GLES20.glGenTextures(1, textureHandles, 0);
 
-			// Parameter texture wrapping & filtering standar OpenGL ES 2.0
-			GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-			GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-			GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-			GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        if (textureHandles[0] != 0) {
+            if (active.textureId > 0) {
+                GLES20.glDeleteTextures(1, new int[]{active.textureId}, 0);
+            }
+            active.textureId = textureHandles[0];
 
-			// Masukkan bitmap ke VRAM OpenGL
-			GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, flippedBitmap, 0);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, active.textureId);
 
-			flippedBitmap.recycle();
-			if (!srcBitmap.isRecycled()) {
-				srcBitmap.recycle();
-			}
-		}
-	}
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+
+            // Masukkan bitmap ke VRAM OpenGL
+            android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, flippedBitmap, 0);
+			GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D);
+
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+            android.util.Log.i("MiniBlenderTex", "Berhasil generate TexID: " + active.textureId);
+        } else {
+            android.util.Log.e("MiniBlenderTex", "Gagal generate OpenGL Texture ID!");
+            active.textureId = 1;
+        }
+
+        flippedBitmap.recycle();
+        if (!srcBitmap.isRecycled()) {
+            srcBitmap.recycle();
+        }
+    }
+	
+	
 	
 	
 

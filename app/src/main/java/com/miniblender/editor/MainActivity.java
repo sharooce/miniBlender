@@ -493,7 +493,6 @@ public class MainActivity extends Activity {
 
     private FrameLayout createScrollableFloatingSubMenu() {
 		FrameLayout container = new FrameLayout(this);
-		// Tambahkan tinggi maksimal agar muat menampung semua tombol & tetap bisa di-scroll saat split screen
 		int maxHeight = (int) (320 * getResources().getDisplayMetrics().density);
 
 		ScrollView scrollView = new ScrollView(this);
@@ -527,7 +526,7 @@ public class MainActivity extends Activity {
 				}
 			});
 
-		// 3. Tombol Open Texture (Kembali Ditambahkan)
+		// 3. Tombol Open Texture 
 		Button btnLoadTex = createMenuButton("Open Texture BMP", "#16A085");
 		btnLoadTex.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -545,7 +544,7 @@ public class MainActivity extends Activity {
 				}
 			});
 
-		// 5. Tombol Export .MDL (Kembali Ditambahkan)
+		// 5. Tombol Export .MDL 
 		Button btnExportMDL = createMenuButton("Export Model (.MDL)", "#C0392B");
 		btnExportMDL.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -645,16 +644,16 @@ public class MainActivity extends Activity {
     }
 	private String getCleanFileName(String inputPath) {
 		if (inputPath == null) return "Unknown";
-		// Dekode karakter URL jika ada (seperti %2F jadi /, %3A jadi :)
+		
 		try {
 			inputPath = java.net.URLDecoder.decode(inputPath, "UTF-8");
 		} catch (Exception ignored) {}
 
-		// Ambil bagian setelah slash terakhir
+		
 		if (inputPath.contains("/")) {
 			inputPath = inputPath.substring(inputPath.lastIndexOf("/") + 1);
 		}
-		// Bersihkan karakter query tambahan jika ada dari Content URI
+		
 		if (inputPath.contains("?")) {
 			inputPath = inputPath.substring(0, inputPath.indexOf("?"));
 		}
@@ -682,11 +681,17 @@ public class MainActivity extends Activity {
 		StringBuilder sb = new StringBuilder();
 		sb.append("❖ miniBlender v1.0 [").append(modeStr).append("]\n");
 		sb.append("Obj: ").append(cleanName).append("\n");
-		// Tampilkan rincian lengkap v, vt, vn, dan f secara rapi
+
 		sb.append("v: ").append(totalVerts)
 			.append(" | vt: ").append(totalUVs)
 			.append(" | vn: ").append(totalNormals)
 			.append(" | f: ").append(totalFaces);
+		sb.append("\nTexID: ").append(activeObj.textureId);
+        if (activeObj.texturePath != null && !activeObj.texturePath.isEmpty()) {
+            sb.append(" | File: ").append(getCleanFileName(activeObj.texturePath));
+        } else {
+            sb.append(" | File: [BELUM DIPILIH]");
+        }
 
 		if (r.isEditMode && totalVerts > 0 && activeObj.selectedVertexIndex >= 0 && activeObj.selectedVertexIndex < totalVerts) {
 			float[] v = mesh.vertices.get(activeObj.selectedVertexIndex);
@@ -703,7 +708,7 @@ public class MainActivity extends Activity {
 		final EditText input = new EditText(this);
 		EditorObject active = glView.getRenderer().getActiveObject();
 
-		// Beri nama default berdasarkan objek aktif
+	
 		String defaultName = (active != null) ? getCleanFileName(active.name) : "model";
 		if (defaultName.contains(".")) {
 			defaultName = defaultName.substring(0, defaultName.lastIndexOf("."));
@@ -719,11 +724,11 @@ public class MainActivity extends Activity {
 					if (!fileName.endsWith(extension)) fileName = fileName + extension;
 					pendingExportFormat = extension;
 
-					// GUNAKAN SAF INTENT UNTUK MEMILIH LOKASI PENYIMPANAN PUBLIK
+			
 					Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
 					intent.addCategory(Intent.CATEGORY_OPENABLE);
 
-					// Tentukan jenis file berdasarkan ekstensinya
+			
 					if (extension.equals(".mdl")) {
 						intent.setType("application/octet-stream");
 					} else {
@@ -731,7 +736,7 @@ public class MainActivity extends Activity {
 					}
 
 					intent.putExtra(Intent.EXTRA_TITLE, fileName);
-					startActivityForResult(intent, 103); // Request code 103 untuk Export File
+					startActivityForResult(intent, 103); 
 				}
 			});
 		builder.setNegativeButton("Batal", null);
@@ -814,7 +819,7 @@ public class MainActivity extends Activity {
     }
 
     private void openTexturePicker() {
-        toggleFloatingMenu(); // Tutup FAB menu saat diklik
+        toggleFloatingMenu(); 
         isInitialLaunch = false;
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("image/*");
@@ -822,7 +827,7 @@ public class MainActivity extends Activity {
     }
 
     private void openModelPicker() {
-        toggleFloatingMenu(); // Tutup FAB menu saat diklik
+        toggleFloatingMenu(); 
         isInitialLaunch = false;
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("*/*");
@@ -835,7 +840,7 @@ public class MainActivity extends Activity {
 		if (resultCode == RESULT_OK && data != null && data.getData() != null) {
 			final Uri uri = data.getData();
 
-			// 1. OPEN TEXTURE BMP
+			
 			if (requestCode == REQUEST_PICK_TEXTURE) {
 				try {
 					InputStream inputStream = getContentResolver().openInputStream(uri);
@@ -866,7 +871,7 @@ public class MainActivity extends Activity {
 					Toast.makeText(this, "Error tekstur: " + e.getMessage(), Toast.LENGTH_SHORT).show();
 				}
 			} 
-			// 2. OPEN MODEL FILE (.3d, .obj, .mdl)
+
 			else if (requestCode == REQUEST_PICK_MODEL) {
 				try {
 					final String path = uri.toString();

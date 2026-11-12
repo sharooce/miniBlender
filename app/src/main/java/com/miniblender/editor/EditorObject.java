@@ -13,7 +13,7 @@ public class EditorObject {
     public float rotY = 0.0f;
     public float rotZ = 0.0f;
     public int selectedVertexIndex = 0;
-    public int textureId = -1;
+    public int textureId = 0;
     public String texturePath = ""; 
 
     public EditorObject(String name) {

@@ -21,6 +21,7 @@ public class MeshModel {
     public List<int[]> triangles = new ArrayList<>();
     public List<int[]> uvTriangles = new ArrayList<>();
     public List<int[]> normalTriangles = new ArrayList<>();
+	public List<float[]> vertexColors = new ArrayList<>();
 
     private FloatBuffer vertexBuffer;
     private FloatBuffer uvBuffer;
@@ -46,59 +47,62 @@ public class MeshModel {
     public boolean isCCWMode = true; 
     private boolean hasNormalsInFile = false;
 
-    // 1. Vertex Shader: Normal ditransformasikan terhadap uMVPMatrix agar konsisten terhadap layar
+    // 1. Vertex Shader: Normal ditransformasikan terhadap uMVPMatrix
     private final String vertexShaderCode =
-        "uniform mat4 uMVPMatrix;\n" +
-        "uniform mat4 uModelMatrix;\n" +
-        "attribute vec4 aPosition;\n" +
-        "attribute vec2 aTexCoord;\n" +
-        "attribute vec3 aNormal;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "varying vec3 vNormal;\n" +
-        "void main() {\n" +
-        "  gl_Position = uMVPMatrix * aPosition;\n" +
-        "  vTexCoord = aTexCoord;\n" +
-        "  vNormal = normalize(mat3(uMVPMatrix) * aNormal);\n" +
-        "}\n";
+	"uniform mat4 uMVPMatrix;\n" +
+	"uniform mat4 uModelMatrix;\n" +
+	"attribute vec4 aPosition;\n" +
+	"attribute vec2 aTexCoord;\n" +
+	"attribute vec3 aNormal;\n" +
+	"varying vec2 vTexCoord;\n" +
+	"varying vec3 vNormal;\n" +
+	"void main() {\n" +
+	"  gl_Position = uMVPMatrix * aPosition;\n" +
+	"  vTexCoord = aTexCoord;\n" +
+	"  vNormal = normalize(mat3(uMVPMatrix) * aNormal);\n" +
+	"}\n";
 
-    // 2. Fragment Shader: Lighting dari Atas-Depan Layar
+    // 2. Fragment Shader: Bypass lighting jika memakai tekstur agar warna asli 100% keluar
     private final String fragmentShaderCode =
-        "precision mediump float;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "varying vec3 vNormal;\n" +
-        "uniform sampler2D uTexture;\n" +
-        "uniform int uUseTexture;\n" +
-        "uniform vec4 uColor;\n" +
-        "uniform vec3 uLightDir;\n" +
-        "void main() {\n" +
-        "  vec3 norm = normalize(vNormal);\n" +
-        "  vec3 lightDir = normalize(uLightDir);\n" +
-        "  float diff = max(dot(norm, lightDir), 0.0);\n" +
-        "  float intensity = 0.35 + (0.65 * diff);\n" +
-        "  vec4 baseColor;\n" +
-        "  if (uUseTexture == 1) {\n" +
-        "    baseColor = texture2D(uTexture, vTexCoord);\n" +
-        "  } else {\n" +
-        "    baseColor = uColor;\n" +
-        "  }\n" +
-        "  gl_FragColor = vec4(baseColor.rgb * intensity, baseColor.a);\n" +
-        "}\n";
+	"precision mediump float;\n" +
+	"varying vec2 vTexCoord;\n" +
+	"varying vec3 vNormal;\n" +
+	"uniform sampler2D uTexture;\n" +
+	"uniform int uUseTexture;\n" +
+	"uniform vec4 uColor;\n" +
+	"uniform vec3 uLightDir;\n" +
+	"void main() {\n" +
+	"  vec3 norm = normalize(vNormal);\n" +
+	"  vec3 lightDir = normalize(uLightDir);\n" +
+	"  float diff = max(dot(norm, lightDir), 0.0);\n" +
+	"  \n" +
+	"  // AMBIENT LIGHTING TINGGI: Paling gelap tetap 75% terang, paling terang 100%\n" +
+	"  float intensity = 0.75 + (0.25 * diff);\n" +
+	"  \n" +
+	"  if (uUseTexture == 1) {\n" +
+	"    vec4 texColor = texture2D(uTexture, vTexCoord);\n" +
+	"    // KUNCI: Warna tekstur dikali intensity lembut (tidak langsung digelapkan total)\n" +
+	"    gl_FragColor = vec4(texColor.rgb * intensity, texColor.a);\n" +
+	"  } else {\n" +
+	"    gl_FragColor = vec4(uColor.rgb * intensity, uColor.a);\n" +
+	"  }\n" +
+	"}\n";
 
     private final String pointVertexShaderCode =
-        "uniform mat4 uMVPMatrix;\n" +
-        "uniform float uPointSize;\n" +
-        "attribute vec4 aPosition;\n" +
-        "void main() {\n" +
-        "  gl_Position = uMVPMatrix * aPosition;\n" +
-        "  gl_PointSize = uPointSize;\n" +
-        "}\n";
+	"uniform mat4 uMVPMatrix;\n" +
+	"uniform float uPointSize;\n" +
+	"attribute vec4 aPosition;\n" +
+	"void main() {\n" +
+	"  gl_Position = uMVPMatrix * aPosition;\n" +
+	"  gl_PointSize = uPointSize;\n" +
+	"}\n";
 
     private final String pointFragmentShaderCode =
-        "precision mediump float;\n" +
-        "uniform vec4 uColor;\n" +
-        "void main() {\n" +
-        "  gl_FragColor = uColor;\n" +
-        "}\n";
+	"precision mediump float;\n" +
+	"uniform vec4 uColor;\n" +
+	"void main() {\n" +
+	"  gl_FragColor = uColor;\n" +
+	"}\n";
 
     public MeshModel() {}
 
@@ -222,76 +226,67 @@ public class MeshModel {
     public void updateBuffers() {
         if (triangles.isEmpty()) return;
 
-        int totalFloats = triangles.size() * 3 * 3;
-        float[] vertexData = new float[totalFloats];
-        float[] normalData = new float[totalFloats];
-        float[] uvData = new float[triangles.size() * 3 * 2];
-
-        int vIdx = 0;
-        int uvIdx = 0;
+        List<Float> finalVerts = new ArrayList<>();
+        List<Float> finalUvs = new ArrayList<>();
+        List<Float> finalNorms = new ArrayList<>();
 
         for (int i = 0; i < triangles.size(); i++) {
             int[] tri = triangles.get(i);
-            int[] uvTri = (i < uvTriangles.size()) ? uvTriangles.get(i) : new int[]{0, 0, 0};
-            int[] normTri = (i < normalTriangles.size()) ? normalTriangles.get(i) : new int[]{0, 0, 0};
+            int[] uvTri = (i < uvTriangles.size() && uvTriangles.get(i) != null) ? uvTriangles.get(i) : tri;
+            int[] normTri = (i < normalTriangles.size() && normalTriangles.get(i) != null) ? normalTriangles.get(i) : tri;
 
             for (int j = 0; j < 3; j++) {
-                int vertexIndex = tri[j];
-                if (vertexIndex >= 0 && vertexIndex < vertices.size()) {
-                    float[] v = vertices.get(vertexIndex);
-                    vertexData[vIdx] = v[0];
-                    vertexData[vIdx + 1] = v[1];
-                    vertexData[vIdx + 2] = v[2];
+                // 1. Vertex Position
+                int vIdx = tri[j];
+                if (vIdx >= 0 && vIdx < vertices.size()) {
+                    float[] v = vertices.get(vIdx);
+                    finalVerts.add(v[0]);
+                    finalVerts.add(v[1]);
+                    finalVerts.add(v[2]);
+                } else {
+                    finalVerts.add(0f); finalVerts.add(0f); finalVerts.add(0f);
                 }
 
-                int normIndex = normTri[j];
-                if (normIndex >= 0 && normIndex < normals.size()) {
-                    float[] n = normals.get(normIndex);
-                    normalData[vIdx] = n[0];
-                    normalData[vIdx + 1] = n[1];
-                    normalData[vIdx + 2] = n[2];
+                // 2. Texture Coordinates (UV)
+                int uvIdx = uvTri[j];
+                if (uvIdx >= 0 && uvIdx < texCoords.size()) {
+                    float[] uv = texCoords.get(uvIdx);
+                    finalUvs.add(uv[0]);
+                    finalUvs.add(uv[1]);
                 } else {
-                    normalData[vIdx] = 0.0f;
-                    normalData[vIdx + 1] = 1.0f;
-                    normalData[vIdx + 2] = 0.0f;
+                    finalUvs.add(0f);
+                    finalUvs.add(0f);
                 }
-                vIdx += 3;
 
-                int uvIndex = uvTri[j];
-                if (uvIndex >= 0 && uvIndex < texCoords.size()) {
-                    float[] uv = texCoords.get(uvIndex);
-                    uvData[uvIdx++] = uv[0];
-                    uvData[uvIdx++] = uv[1];
+                // 3. Normals
+                int nIdx = normTri[j];
+                if (nIdx >= 0 && nIdx < normals.size()) {
+                    float[] n = normals.get(nIdx);
+                    finalNorms.add(n[0]);
+                    finalNorms.add(n[1]);
+                    finalNorms.add(n[2]);
                 } else {
-                    uvData[uvIdx++] = 0.0f;
-                    uvData[uvIdx++] = 0.0f;
+                    finalNorms.add(0f); finalNorms.add(1f); finalNorms.add(0f);
                 }
             }
         }
 
-        ByteBuffer vbb = ByteBuffer.allocateDirect(vertexData.length * 4);
-        vbb.order(ByteOrder.nativeOrder());
-        vertexBuffer = vbb.asFloatBuffer();
-        vertexBuffer.put(vertexData);
+        vertexBuffer = ByteBuffer.allocateDirect(finalVerts.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        for (float f : finalVerts) vertexBuffer.put(f);
         vertexBuffer.position(0);
 
-        ByteBuffer nbb = ByteBuffer.allocateDirect(normalData.length * 4);
-        nbb.order(ByteOrder.nativeOrder());
-        normalBuffer = nbb.asFloatBuffer();
-        normalBuffer.put(normalData);
-        normalBuffer.position(0);
-
-        ByteBuffer uvb = ByteBuffer.allocateDirect(uvData.length * 4);
-        uvb.order(ByteOrder.nativeOrder());
-        uvBuffer = uvb.asFloatBuffer();
-        uvBuffer.put(uvData);
+        uvBuffer = ByteBuffer.allocateDirect(finalUvs.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        for (float f : finalUvs) uvBuffer.put(f);
         uvBuffer.position(0);
+
+        normalBuffer = ByteBuffer.allocateDirect(finalNorms.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        for (float f : finalNorms) normalBuffer.put(f);
+        normalBuffer.position(0);
     }
 
     public void draw(float[] mvpMatrix, float[] modelMatrix, int textureId, int selectedVertexIndex, boolean isEditMode) {
         if (vertexBuffer == null || uvBuffer == null || normalBuffer == null) return;
 
-        // KUNCI DEPTH TEST DAN DEPTH MASK DULU
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
         GLES20.glDepthFunc(GLES20.GL_LEQUAL);
         GLES20.glDepthMask(true);
@@ -301,7 +296,6 @@ public class MeshModel {
         GLES20.glUniformMatrix4fv(modelMatrixHandle, 1, false, modelMatrix, 0);
 
         if (uLightDirHandle != -1) {
-            // Arah Cahaya dari Atas-Depan Layar HP (X=0.0, Y=1.0, Z=1.0)
             GLES20.glUniform3f(uLightDirHandle, 0.0f, 1.0f, 1.0f);
         }
 
@@ -324,13 +318,11 @@ public class MeshModel {
             GLES20.glUniform4f(colorHandle, 0.75f, 0.75f, 0.8f, 1.0f);
         }
 
-        // Render Bodi Poligon 3D
         GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL);
         GLES20.glPolygonOffset(1.0f, 1.0f);
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size() * 3);
         GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL);
 
-        // Render Wireframe (Wireframe Oranye Khas Blender)
         if (isEditMode) {
             GLES20.glUniform1i(uUseTextureHandle, 0);
             GLES20.glUniform4f(colorHandle, 1.0f, 0.55f, 0.0f, 1.0f);
@@ -359,7 +351,6 @@ public class MeshModel {
         GLES20.glDisableVertexAttribArray(normalHandle);
         GLES20.glDisableVertexAttribArray(textureCoordHandle);
 
-        // Render Titik Vertex (GL_POINTS)
         if (isEditMode && pointProgram != 0) {
             GLES20.glUseProgram(pointProgram);
             GLES20.glUniformMatrix4fv(pMVPMatrixHandle, 1, false, mvpMatrix, 0);
@@ -393,7 +384,7 @@ public class MeshModel {
         }
     }
 
-    public void importFromFile(InputStream inputStream, String fileName) throws Exception {
+	public void importFromFile(InputStream inputStream, String fileName) throws Exception {
         if (fileName != null && fileName.toLowerCase().endsWith(".mdl")) {
             importFromBinaryMDL(inputStream);
             return;
@@ -412,54 +403,66 @@ public class MeshModel {
         List<float[]> rawV = new ArrayList<>();
         List<float[]> rawVT = new ArrayList<>();
         List<int[]> rawFaces = new ArrayList<>();
+        List<int[]> rawUVFaces = new ArrayList<>();
+        boolean hasExplicitUVIndex = false;
 
         while ((line = reader.readLine()) != null) {
             line = line.trim();
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("NUM_")) continue;
 
+            // Hapus komentar di tengah/akhir baris (seperti # 1 (index 0) pada Aston Martin)
+            int commentIdx = line.indexOf('#');
+            if (commentIdx != -1) {
+                line = line.substring(0, commentIdx).trim();
+            }
+            if (line.isEmpty()) continue;
+
             String[] tokens = line.split("\\s+");
             if (tokens.length == 0) continue;
-            String head = tokens[0];
+            String head = tokens[0].toLowerCase();
 
             try {
-                if (head.equalsIgnoreCase("v")) {
-                    if (tokens.length >= 6) {
+                if (head.equals("v")) {
+                    // Ambil 3 koordinat pertama (x, y, z) — aman walau ada vertex color r g b di belakangnya
+                    if (tokens.length >= 4) {
                         rawV.add(new float[]{
-                            Float.parseFloat(tokens[1]),
-                            Float.parseFloat(tokens[2]),
-                            Float.parseFloat(tokens[3])
-                        });
-                        rawVT.add(new float[]{
-                            Float.parseFloat(tokens[4]),
-                            Float.parseFloat(tokens[5])
-                        });
-                    } else if (tokens.length >= 4) {
-                        rawV.add(new float[]{
-                            Float.parseFloat(tokens[1]),
-                            Float.parseFloat(tokens[2]),
-                            Float.parseFloat(tokens[3])
-                        });
+									 Float.parseFloat(tokens[1]),
+									 Float.parseFloat(tokens[2]),
+									 Float.parseFloat(tokens[3])
+								 });
                     }
-                } else if (head.equalsIgnoreCase("vt")) {
+                } else if (head.equals("vt")) {
                     if (tokens.length >= 3) {
                         rawVT.add(new float[]{
-                            Float.parseFloat(tokens[1]),
-                            Float.parseFloat(tokens[2])
-                        });
+									  Float.parseFloat(tokens[1]),
+									  Float.parseFloat(tokens[2])
+								  });
                     }
-                } else if (head.equalsIgnoreCase("f")) {
+                } else if (head.equals("f")) {
                     if (tokens.length >= 4) {
-                        int[] fData = new int[3];
-                        for (int i = 0; i < 3; i++) {
+                        int polyCount = tokens.length - 1;
+                        int[] polyV = new int[polyCount];
+                        int[] polyUV = new int[polyCount];
+
+                        for (int i = 0; i < polyCount; i++) {
                             String token = tokens[i + 1];
                             if (token.contains("/")) {
                                 String[] sub = token.split("/", -1);
-                                if (!sub[0].isEmpty()) fData[i] = Integer.parseInt(sub[0]);
+                                if (!sub[0].isEmpty()) polyV[i] = Integer.parseInt(sub[0]);
+                                if (sub.length > 1 && !sub[1].isEmpty()) {
+                                    polyUV[i] = Integer.parseInt(sub[1]);
+                                    hasExplicitUVIndex = true;
+                                }
                             } else {
-                                fData[i] = Integer.parseInt(token);
+                                polyV[i] = Integer.parseInt(token);
                             }
                         }
-                        rawFaces.add(fData);
+
+                        // Fan Triangulation (mendukung Triangle, Quad 4 titik, & N-Gon)
+                        for (int i = 1; i < polyCount - 1; i++) {
+                            rawFaces.add(new int[]{polyV[0], polyV[i], polyV[i + 1]});
+                            rawUVFaces.add(new int[]{polyUV[0], polyUV[i], polyUV[i + 1]});
+                        }
                     }
                 }
             } catch (Exception ignored) {}
@@ -468,43 +471,111 @@ public class MeshModel {
 
         if (rawV.isEmpty()) return;
 
-        for (int i = 0; i < rawV.size(); i++) {
-            float[] v = rawV.get(i);
-            float u = (i < rawVT.size()) ? rawVT.get(i)[0] : 0.5f;
-            float vt = (i < rawVT.size()) ? rawVT.get(i)[1] : 0.5f;
+        // ------------------------------------------------------------------
+        // 1. AUTO-NORMALIZE & CENTER (Untuk OBJ berskala ratusan)
+        // ------------------------------------------------------------------
+        float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+        float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
 
-            vertices.add(new float[]{v[0], v[1], v[2]});
-            texCoords.add(new float[]{u, vt});
+        for (float[] v : rawV) {
+            if (v[0] < minX) minX = v[0];
+            if (v[0] > maxX) maxX = v[0];
+            if (v[1] < minY) minY = v[1];
+            if (v[1] > maxY) maxY = v[1];
+            if (v[2] < minZ) minZ = v[2];
+            if (v[2] > maxZ) maxZ = v[2];
+        }
+
+        float centerX = (minX + maxX) * 0.5f;
+        float centerY = (minY + maxY) * 0.5f;
+        float centerZ = (minZ + maxZ) * 0.5f;
+
+        float maxDimension = Math.max(maxX - minX, Math.max(maxY - minY, maxZ - minZ));
+        float scaleFactor = 1.0f;
+        boolean shouldNormalize = (maxDimension > 3.0f || (maxDimension > 0.0001f && maxDimension < 0.1f));
+        if (shouldNormalize) {
+            scaleFactor = 1.5f / maxDimension;
+        }
+
+        for (float[] v : rawV) {
+            float vx = shouldNormalize ? (v[0] - centerX) * scaleFactor : v[0];
+            float vy = shouldNormalize ? (v[1] - centerY) * scaleFactor : v[1];
+            float vz = shouldNormalize ? (v[2] - centerZ) * scaleFactor : v[2];
+
+            vertices.add(new float[]{vx, vy, vz});
             normals.add(new float[]{0.0f, 1.0f, 0.0f});
         }
 
-        boolean isOneBased = false;
+        for (float[] vt : rawVT) {
+            texCoords.add(new float[]{vt[0], vt[1]});
+        }
+        if (texCoords.isEmpty()) {
+            texCoords.add(new float[]{0.5f, 0.5f});
+        }
+
+        // ------------------------------------------------------------------
+        // 2. DETEKSI AKURAT 0-BASED VS 1-BASED
+        // ------------------------------------------------------------------
+        boolean hasZeroVertexIndex = false;
         for (int[] f : rawFaces) {
-            if (f[0] >= rawV.size() || f[1] >= rawV.size() || f[2] >= rawV.size()) {
-                isOneBased = true;
+            if (f[0] == 0 || f[1] == 0 || f[2] == 0) {
+                hasZeroVertexIndex = true;
                 break;
             }
         }
-        int offset = isOneBased ? 1 : 0;
+        int offset = (!rawFaces.isEmpty() && !hasZeroVertexIndex) ? 1 : 0;
 
-        for (int[] f : rawFaces) {
-            int v0 = f[0] - offset;
-            int v1 = f[1] - offset;
-            int v2 = f[2] - offset;
+        boolean hasZeroUVIndex = false;
+        for (int[] uvf : rawUVFaces) {
+            if (uvf[0] == 0 || uvf[1] == 0 || uvf[2] == 0) {
+                hasZeroUVIndex = true;
+                break;
+            }
+        }
+        int uvOffset = (hasExplicitUVIndex && !hasZeroUVIndex) ? 1 : 0;
+
+        // ------------------------------------------------------------------
+        // 3. RAKIT TRIANGLE & UV BUFFER
+        // ------------------------------------------------------------------
+        for (int i = 0; i < rawFaces.size(); i++) {
+            int[] f = rawFaces.get(i);
+            int[] uvf = rawUVFaces.get(i);
+
+            int v0 = (f[0] < 0) ? (rawV.size() + f[0]) : (f[0] - offset);
+            int v1 = (f[1] < 0) ? (rawV.size() + f[1]) : (f[1] - offset);
+            int v2 = (f[2] < 0) ? (rawV.size() + f[2]) : (f[2] - offset);
+
+            int uv0, uv1, uv2;
+            if (hasExplicitUVIndex) {
+                uv0 = (uvf[0] < 0) ? (rawVT.size() + uvf[0]) : (uvf[0] - uvOffset);
+                uv1 = (uvf[1] < 0) ? (rawVT.size() + uvf[1]) : (uvf[1] - uvOffset);
+                uv2 = (uvf[2] < 0) ? (rawVT.size() + uvf[2]) : (uvf[2] - uvOffset);
+            } else {
+                // Jika tidak ada slash (misal file 0-based: f 0 1 7), UV ikut indeks vertex
+                uv0 = v0;
+                uv1 = v1;
+                uv2 = v2;
+            }
 
             if (v0 >= 0 && v0 < vertices.size() &&
                 v1 >= 0 && v1 < vertices.size() &&
                 v2 >= 0 && v2 < vertices.size()) {
 
                 if (isCCWMode) {
-                    int temp = v1;
-                    v1 = v2;
-                    v2 = temp;
+                    int temp = v1; v1 = v2; v2 = temp;
+                    int tempUV = uv1; uv1 = uv2; uv2 = tempUV;
                 }
 
                 int[] tri = new int[]{v0, v1, v2};
+                int[] uvTri = new int[]{
+                    (uv0 >= 0 && uv0 < texCoords.size()) ? uv0 : 0,
+                    (uv1 >= 0 && uv1 < texCoords.size()) ? uv1 : 0,
+                    (uv2 >= 0 && uv2 < texCoords.size()) ? uv2 : 0
+                };
+
                 triangles.add(tri);
-                uvTriangles.add(tri);
+                uvTriangles.add(uvTri);
                 normalTriangles.add(tri);
             }
         }
@@ -512,6 +583,7 @@ public class MeshModel {
         recalculateNormals();
         updateBuffers();
     }
+	
 
     public void switchWindingMode() {
         isCCWMode = !isCCWMode;
@@ -670,9 +742,9 @@ public class MeshModel {
             int[] norm = (i < normalTriangles.size()) ? normalTriangles.get(i) : new int[]{0, 0, 0};
 
             writer.write(String.format("f %d/%d/%d %d/%d/%d %d/%d/%d\n", 
-                tri[0]+1, uv[0]+1, norm[0]+1, 
-                tri[1]+1, uv[1]+1, norm[1]+1, 
-                tri[2]+1, uv[2]+1, norm[2]+1));
+									   tri[0]+1, uv[0]+1, norm[0]+1, 
+									   tri[1]+1, uv[1]+1, norm[1]+1, 
+									   tri[2]+1, uv[2]+1, norm[2]+1));
         }
         writer.close();
     }
@@ -742,3 +814,4 @@ public class MeshModel {
         dos.write(bytes, 0, 4);
     }
 }
+
