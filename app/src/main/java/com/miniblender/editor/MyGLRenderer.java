@@ -18,6 +18,7 @@ import javax.microedition.khronos.opengles.GL10;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import android.content.*;
+import android.opengl.*;
 
 public class MyGLRenderer implements GLSurfaceView.Renderer {
 
@@ -69,6 +70,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         mesh.addVertex( 1.0f, -1.0f, -1.0f, 1.0f, 0.0f);
         mesh.addVertex( 1.0f,  1.0f, -1.0f, 1.0f, 1.0f);
         mesh.addVertex(-1.0f,  1.0f, -1.0f, 0.0f, 1.0f);
+		
 
         int[] indices = {
             0,1,2, 2,3,0,  1,5,6, 6,2,1,
@@ -108,24 +110,67 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         objects.add(obj);
         activeObjectIndex = objects.size() - 1;
     }
+	
+	private String resolveRealFilePath(String rawPath) {
+        if (rawPath == null || rawPath.isEmpty()) return "";
 
-    public void replaceOrImportModelObject(InputStream inputStream, String fileName) throws Exception {
+        try {
+            // Decode %3A -> ':' dan %2F -> '/'
+            String decoded = java.net.URLDecoder.decode(rawPath, "UTF-8");
+
+            // Jika formatnya content://.../document/primary:symbian/pys60_games/aventador.obj
+            if (decoded.contains("primary:")) {
+                String relPath = decoded.substring(decoded.indexOf("primary:") + "primary:".length());
+                File realFile = new File(android.os.Environment.getExternalStorageDirectory(), relPath);
+                return realFile.getAbsolutePath();
+            }
+            // Jika formatnya SD Card eksternal: /document/XXXX-XXXX:folder/file.obj
+            if (decoded.startsWith("content://") && decoded.contains(":")) {
+                String afterScheme = decoded.substring("content://".length());
+                if (afterScheme.contains(":")) {
+                    String[] parts = afterScheme.split(":", 2);
+                    String storageId = parts[0].substring(parts[0].lastIndexOf('/') + 1);
+                    return "/storage/" + storageId + "/" + parts[1];
+                }
+            }
+            // Jika formatnya file:///storage/...
+            if (decoded.startsWith("file://")) {
+                return new File(android.net.Uri.parse(decoded).getPath()).getAbsolutePath();
+            }
+            return decoded;
+        } catch (Exception e) {
+            return rawPath;
+        }
+    }
+
+	public void replaceOrImportModelObject(InputStream inputStream, String fileName) throws Exception {
+        String realPath = resolveRealFilePath(fileName);
         String objName = "Model_" + (objects.size() + 1);
-        if (fileName != null && fileName.contains("/")) {
-            objName = fileName.substring(fileName.lastIndexOf("/") + 1);
+        String parentPath = null;
+
+        if (!realPath.isEmpty()) {
+            File f = new File(realPath);
+            objName = f.getName();
+            if (f.getParentFile() != null) {
+                parentPath = f.getParentFile().getAbsolutePath();
+            }
         }
 
         EditorObject active = getActiveObject();
         if (active != null && active.name.equalsIgnoreCase("Bodi Main") && objects.size() == 1) {
             active.name = objName;
-            active.mesh.importFromFile(inputStream, fileName);
+            active.modelPath = realPath;
+            active.mesh.importFromFile(inputStream, objName, parentPath);
+            active.mtlStatus = active.mesh.lastMtlStatus;
             if (programShaderInitialized) {
                 active.mesh.initShader();
                 active.mesh.updateBuffers();
             }
         } else {
             EditorObject newObj = new EditorObject(objName);
-            newObj.mesh.importFromFile(inputStream, fileName);
+            newObj.modelPath = realPath;
+            newObj.mesh.importFromFile(inputStream, objName, parentPath);
+            newObj.mtlStatus = newObj.mesh.lastMtlStatus;
             if (programShaderInitialized) {
                 newObj.mesh.initShader();
                 newObj.mesh.updateBuffers();
@@ -134,6 +179,40 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             activeObjectIndex = objects.size() - 1;
         }
     }
+	
+	
+	public void rotateActiveObjectScreenAligned(float dx, float dy) {
+		EditorObject active = getActiveObject();
+		if (active == null) return;
+
+		if (active.rotationMatrix[0] == 0f && active.rotationMatrix[5] == 0f && active.rotationMatrix[10] == 0f) {
+			Matrix.setIdentityM(active.rotationMatrix, 0);
+		}
+
+		float angle = (float) Math.hypot(dx, dy) * 0.5f;
+		if (angle < 0.0001f) return;
+
+		float[] screenAxis = new float[]{dy, dx, 0.0f, 0.0f};
+
+		float[] roomRotMat = new float[16];
+		Matrix.setIdentityM(roomRotMat, 0);
+		Matrix.rotateM(roomRotMat, 0, rotX, 1f, 0f, 0f);
+		Matrix.rotateM(roomRotMat, 0, rotY, 0f, 1f, 0f);
+
+		float[] invRoomRotMat = new float[16];
+		if (Matrix.invertM(invRoomRotMat, 0, roomRotMat, 0)) {
+			float[] worldAxis = new float[4];
+			Matrix.multiplyMV(worldAxis, 0, invRoomRotMat, 0, screenAxis, 0);
+
+			float[] deltaRot = new float[16];
+			Matrix.setIdentityM(deltaRot, 0);
+			Matrix.rotateM(deltaRot, 0, angle, worldAxis[0], worldAxis[1], worldAxis[2]);
+
+			float[] resultMat = new float[16];
+			Matrix.multiplyMM(resultMat, 0, deltaRot, 0, active.rotationMatrix, 0);
+			System.arraycopy(resultMat, 0, active.rotationMatrix, 0, 16);
+		}
+	}
 
     public void removeActiveObject() {
         if (objects.isEmpty()) return;
@@ -145,15 +224,33 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             }
             activeObj.mesh.vertices.clear();
             activeObj.mesh.triangles.clear();
+			activeObj.mesh.vertexColors.clear();
+			activeObj.mesh.texCoords.clear();
+			activeObj.mesh.normals.clear();
+			activeObj.mesh.normalTriangles.clear();
+			activeObj.mesh.uvTriangles.clear();
+			activeObj.mesh.faceColors.clear();
+			activeObj.mesh.lastMtlStatus="No MTL";
+			activeObj.modelPath="";
+			activeObj.mtlStatus="No MTL";
+			
         }
 
         if (objects.size() == 1) {
+			SharedPreferences pref = context.getSharedPreferences("MiniBlenderPrefs", Context.MODE_PRIVATE);
+            pref.edit().remove("cached_scene_json").apply();
+
+            File cacheFile = new File(context.getCacheDir(), "miniblender_scene_cache.json");
+            if (cacheFile.exists()) {
+                cacheFile.delete();
+            }
             EditorObject defaultObj = objects.get(0);
             defaultObj.name = "Bodi Main";
             defaultObj.texturePath = "";
             initDefaultCube(defaultObj.mesh);
             defaultObj.mesh.updateBuffers();
             activeObjectIndex = 0;
+			
             return;
         }
 
@@ -161,6 +258,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         if (activeObjectIndex >= objects.size()) {
             activeObjectIndex = objects.size() - 1;
         }
+		saveAllObjectsToCache(context, activeObjectIndex);
+        saveSceneToCache();
     }
 
     public void switchNextObject() {
@@ -202,13 +301,12 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 		}
 	}
 
-// Load seluruh daftar objects dari SharedPreferences
 	public int loadAllObjectsFromCache(Context context) {
 		SharedPreferences pref = context.getSharedPreferences("MiniBlenderPrefs", Context.MODE_PRIVATE);
 		String jsonString = pref.getString("cached_scene_json", null);
 		resetRoomTransform();
 		if (jsonString == null || jsonString.isEmpty()) {
-			return 0; // Mengembalikan indeks default jika belum ada cache
+			return 0; 
 		}
 
 		try {
@@ -220,7 +318,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 			for (int i = 0; i < objectsArray.length(); i++) {
 				JSONObject objJson = objectsArray.getJSONObject(i);
 				EditorObject obj = new EditorObject();
-				obj.mesh.initShader(); // Inisialisasi shader GPU untuk mesh baru
+				obj.mesh.initShader(); 
 				obj.fromJSONObject(objJson);
 				objects.add(obj);
 			}
@@ -270,6 +368,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         android.opengl.Matrix.translateM(roomMatrix, 0, posX, posY, 0.0f);
         android.opengl.Matrix.rotateM(roomMatrix, 0, rotX, 1.0f, 0.0f, 0.0f);
         android.opengl.Matrix.rotateM(roomMatrix, 0, rotY, 0.0f, 1.0f, 0.0f);
+		
 
         if (gridFloor != null) {
             float[] gridMvp = new float[16];
@@ -283,6 +382,39 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         for (int i = 0; i < objects.size(); i++) {
             EditorObject obj = objects.get(i);
             boolean isThisObjectActive = (i == activeObjectIndex);
+			
+			if (obj.pendingTextureBitmap != null && !obj.pendingTextureBitmap.isRecycled()) {
+				GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
+				int[] textureHandles = new int[1];
+				GLES20.glGenTextures(1, textureHandles, 0);
+
+				if (textureHandles[0] != 0) {
+					if (obj.textureId > 0) {
+						GLES20.glDeleteTextures(1, new int[]{obj.textureId}, 0);
+					}
+					obj.textureId = textureHandles[0];
+					if (context instanceof MainActivity) {
+						((MainActivity) context).runOnUiThread(new Runnable() {
+								@Override
+								public void run() {
+									((MainActivity) context).updateOverlayInfo();
+								}
+							});
+					}
+
+					GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, obj.textureId);
+					GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+					GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+					GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT);
+					GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT);
+
+					android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, obj.pendingTextureBitmap, 0);
+					GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+				}
+
+				obj.pendingTextureBitmap.recycle();
+				obj.pendingTextureBitmap = null;
+			}
 
             // Jika mode Single View aktif, sembunyikan objek lain
             if (isSingleViewMode && !isThisObjectActive) continue;
@@ -299,72 +431,60 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 
             android.opengl.Matrix.multiplyMM(tempMatrix, 0, viewMatrix, 0, scratchModelMatrix, 0);
             android.opengl.Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, tempMatrix, 0);
+			
+			Matrix.setIdentityM(scratchModelMatrix, 0);
+			Matrix.translateM(scratchModelMatrix, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
 
+			float[] tempMat = new float[16];
+			Matrix.multiplyMM(tempMat, 0, scratchModelMatrix, 0, obj.rotationMatrix, 0);
+			System.arraycopy(tempMat, 0, scratchModelMatrix, 0, 16);
+			
+            System.arraycopy(roomMatrix, 0, scratchModelMatrix, 0, 16);
+            android.opengl.Matrix.scaleM(scratchModelMatrix, 0, scaleFactor, scaleFactor, scaleFactor);
+
+            
+            android.opengl.Matrix.translateM(scratchModelMatrix, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
+
+            if (obj.rotationMatrix[0] == 0f && obj.rotationMatrix[5] == 0f && obj.rotationMatrix[10] == 0f) {
+                android.opengl.Matrix.setIdentityM(obj.rotationMatrix, 0);
+            }
+            android.opengl.Matrix.multiplyMM(tempMatrix, 0, scratchModelMatrix, 0, obj.rotationMatrix, 0);
+            System.arraycopy(tempMatrix, 0, scratchModelMatrix, 0, 16);
+
+            
+            android.opengl.Matrix.multiplyMM(tempMatrix, 0, viewMatrix, 0, scratchModelMatrix, 0);
+            android.opengl.Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, tempMatrix, 0);
+			
             obj.mesh.draw(mvpMatrix, scratchModelMatrix, obj.textureId, obj.selectedVertexIndex, isEditMode && isThisObjectActive);
+			
         }
     }
 
     // PASANG TEKSTUR HANYA KE OBJEK YANG SEDANG AKTIF
 	public void loadTextureForActiveObject(final Bitmap srcBitmap, final String texturePath) {
         EditorObject active = getActiveObject();
-        if (active == null) return;
+        if (active == null || srcBitmap == null || srcBitmap.isRecycled()) return;
 
-        if (texturePath != null) {
-            active.texturePath = texturePath;
-        }
-
-        if (srcBitmap == null || srcBitmap.isRecycled()) {
-            android.util.Log.e("MiniBlenderTex", "Gagal memuat bitmap: Bitmap null atau sudah direcycle!");
-            return;
-        }
-
-        android.util.Log.i("MiniBlenderTex", "Memuat tekstur: " + srcBitmap.getWidth() + "x" + srcBitmap.getHeight());
-
-        // Konversi ke ARGB_8888 agar aman dibaca OpenGL
-        Bitmap argbBmp = srcBitmap.copy(Bitmap.Config.ARGB_8888, true);
-
-        // Flip vertikal bitmap agar sesuai dengan koordinat UV OpenGL
+        int w = srcBitmap.getWidth();
+        int h = srcBitmap.getHeight();
+        Bitmap flippedBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(flippedBitmap);
         android.graphics.Matrix matrix = new android.graphics.Matrix();
-        matrix.postScale(1.0f, -1.0f);
-        final Bitmap flippedBitmap = Bitmap.createBitmap(
-            argbBmp, 0, 0, argbBmp.getWidth(), argbBmp.getHeight(), matrix, true
-        );
-        if (argbBmp != srcBitmap) argbBmp.recycle();
+        matrix.postScale(1.0f, -1.0f, w * 0.5f, h * 0.5f);
+        canvas.drawBitmap(srcBitmap, matrix, null);
 
-        int[] textureHandles = new int[1];
-        GLES20.glGenTextures(1, textureHandles, 0);
-
-        if (textureHandles[0] != 0) {
-            if (active.textureId > 0) {
-                GLES20.glDeleteTextures(1, new int[]{active.textureId}, 0);
-            }
-            active.textureId = textureHandles[0];
-
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, active.textureId);
-
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-
-            // Masukkan bitmap ke VRAM OpenGL
-            android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, flippedBitmap, 0);
-			GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D);
-
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
-            android.util.Log.i("MiniBlenderTex", "Berhasil generate TexID: " + active.textureId);
-        } else {
-            android.util.Log.e("MiniBlenderTex", "Gagal generate OpenGL Texture ID!");
-            active.textureId = 1;
-        }
-
-        flippedBitmap.recycle();
         if (!srcBitmap.isRecycled()) {
             srcBitmap.recycle();
         }
+
+        if (active.pendingTextureBitmap != null && !active.pendingTextureBitmap.isRecycled()) {
+            active.pendingTextureBitmap.recycle();
+        }
+        active.pendingTextureBitmap = flippedBitmap;
+        if (texturePath != null) {
+            active.texturePath = texturePath;
+        }
     }
-	
-	
 	
 	
 

@@ -54,9 +54,6 @@ public class MainActivity extends Activity {
     private String pendingExportFormat = ".3d";
     private boolean isInitialLaunch = true;
 	
-
-    // Variabel Touch & Scale Gesture
-    private float previousX, previousY;
     private ScaleGestureDetector scaleGestureDetector;
 
     @Override
@@ -72,74 +69,19 @@ public class MainActivity extends Activity {
 
         glView = new MyGLSurfaceView(this);
 
-        // SETUP SCALE GESTURE DETECTOR UNTUK PINCH ZOOM IN / OUT
         scaleGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
 				@Override
 				public boolean onScale(ScaleGestureDetector detector) {
 					MyGLRenderer renderer = glView.getRenderer();
 					if (renderer != null) {
 						renderer.scaleFactor *= detector.getScaleFactor();
-						// Batasi skala agar tidak terlalu kecil atau terlalu besar
 						renderer.scaleFactor = Math.max(0.1f, Math.min(renderer.scaleFactor, 10.0f));
 						glView.requestRender();
 					}
 					return true;
 				}
 			});
-
-        // CUSTOM TOUCH LISTENER (MENDUKUNG ROTASI ROOM/OBJ & PINCH ZOOM)
-		/*
-        glView.setOnTouchListener(new View.OnTouchListener() {
-				@Override
-				public boolean onTouch(View v, MotionEvent event) {
-					// Tangkap event pinch-zoom terlebih dahulu
-					scaleGestureDetector.onTouchEvent(event);
-
-					float x = event.getX();
-					float y = event.getY();
-					MyGLRenderer renderer = glView.getRenderer();
-
-					// Jika sedang melakukan pinch dengan 2 jari, abaikan rotasi satu jari
-					if (event.getPointerCount() > 1) {
-						return true;
-					}
-
-					switch (event.getAction()) {
-						case MotionEvent.ACTION_DOWN:
-							previousX = x;
-							previousY = y;
-							break;
-						case MotionEvent.ACTION_MOVE:
-							float dx = x - previousX;
-							float dy = y - previousY;
-
-							if (renderer != null) {
-								if (renderer.currentTouchMode==renderer.TOUCH_MODE_ROOM) {
-									renderer.rotY += dx * 0.5f;
-									renderer.rotX += dy * 0.5f;
-								}
-								else if(renderer.currentTouchMode==renderer.TOUCH_MODE_OBJ_MOVE){
-									EditorObject active = renderer.getActiveObject();
-									active.offsetX += dx * 0.01f;
-									active.offsetY -= dy * 0.01f; 
-								}
-								else if(renderer.currentTouchMode==renderer.TOUCH_MODE_OBJ_ROT){
-									EditorObject active = renderer.getActiveObject();
-									if (active != null) {
-										active.rotY += dx * 0.5f;
-										active.rotX += dy * 0.5f;
-									}
-								}
-								glView.requestRender();
-							}
-							previousX = x;
-							previousY = y;
-							break;
-					}
-					return true;
-				}
-			});
-		*/
+		
 
         viewportContainer.addView(glView, new FrameLayout.LayoutParams(
 									  FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -297,20 +239,14 @@ public class MainActivity extends Activity {
 				}
 			});
 			
-		Button btnFlipFace = createGlassButton("FLIP FACE", "#D0392B", "#E34C3C");
+		Button btnResetView = createGlassButton("Reset View", "#D0392B", "#E34C3C");
 		
-		final MeshModel meshModel=glView.getRenderer().getActiveObject().mesh;
-		btnFlipFace.setOnClickListener(new View.OnClickListener() {
+		final MyGLRenderer renderer=glView.getRenderer();
+		btnResetView.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
-					if (meshModel != null) {
-						meshModel.switchWindingMode(); // Membalik arah hadap poligon secara instan
-
-						// Tampilkan status aktif di layar (opsional)
-						String modeName = meshModel.isCCWMode ? "CCW" : "CW";
-						Toast.makeText(MainActivity.this, "Winding Mode: " + modeName, Toast.LENGTH_SHORT).show();
-
-						// Render ulang tampilan 3D
+					if (renderer != null) {
+						renderer.resetRoomTransform();
 						if (glView != null) {
 							glView.requestRender();
 						}
@@ -319,7 +255,7 @@ public class MainActivity extends Activity {
 			});
 
         rowObj.addView(btnPrevObj, new LinearLayout.LayoutParams(0, -2, 0.7f));
-		rowObj.addView(btnFlipFace);
+		rowObj.addView(btnResetView);
         rowObj.addView(btnNextObj, new LinearLayout.LayoutParams(0, -2, 0.7f));
         rowObj.addView(btnTouchModeSwitch, new LinearLayout.LayoutParams(0, -2, 1.0f));
         rowObj.addView(btnViewMode, new LinearLayout.LayoutParams(0, -2, 0.8f));
@@ -562,7 +498,7 @@ public class MainActivity extends Activity {
 				}
 			});
 
-		// Masukkan semua tombol ke dalam panel
+		
 		panel.addView(btnAddCube);
 		panel.addView(btnLoadModel);
 		panel.addView(btnLoadTex);
@@ -697,6 +633,13 @@ public class MainActivity extends Activity {
 			float[] v = mesh.vertices.get(activeObj.selectedVertexIndex);
 			sb.append(String.format("\nActive V[%d]: X:%.2f Y:%.2f Z:%.2f", activeObj.selectedVertexIndex, v[0], v[1], v[2]));
 		}
+		if (activeObj != null) {
+			String infoText = "\nObj: " + activeObj.name +
+				"\nV: " + activeObj.mesh.vertices.size() + " | F: " + activeObj.mesh.triangles.size() +
+				"\nPath: " + (activeObj.modelPath.isEmpty() ? "-" : activeObj.modelPath) +
+				"\nStatus: " + activeObj.mtlStatus;
+			sb.append(infoText);
+		}
 
 		tvOverlayInfo.setText(sb.toString());
 	}
@@ -806,15 +749,31 @@ public class MainActivity extends Activity {
     }
 
     private boolean checkStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{
-									   Manifest.permission.READ_EXTERNAL_STORAGE,
-									   Manifest.permission.WRITE_EXTERNAL_STORAGE
-								   }, REQUEST_PERMISSION_STORAGE);
-                return false;
-            }
-        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+			if (!android.os.Environment.isExternalStorageManager()) {
+				try {
+					android.content.Intent intent = new android.content.Intent(
+						android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+					);
+					intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+					startActivity(intent);
+				} catch (Exception e) {
+					android.content.Intent intent = new android.content.Intent(
+						android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+					);
+					startActivity(intent);
+				}
+			}
+		} else {
+			if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) 
+				!= android.content.pm.PackageManager.PERMISSION_GRANTED) {
+				requestPermissions(new String[]{
+									   android.Manifest.permission.READ_EXTERNAL_STORAGE,
+									   android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+								   }, 101);
+				return false;
+			}
+		}
         return true;
     }
 
@@ -833,6 +792,86 @@ public class MainActivity extends Activity {
         intent.setType("*/*");
         startActivityForResult(Intent.createChooser(intent, "Buka File Model (.3d/.obj/.mdl)"), REQUEST_PICK_MODEL);
     }
+	private Bitmap decodeBitmapSafe(Uri uri) {
+		try {
+			// 1. Coba decoder bawaan Android dulu
+			InputStream is = getContentResolver().openInputStream(uri);
+			BitmapFactory.Options options = new BitmapFactory.Options();
+			options.inScaled = false;
+			options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+			Bitmap bmp = BitmapFactory.decodeStream(is, null, options);
+			if (is != null) is.close();
+			if (bmp != null) return bmp;
+
+			// 2. Jika null (misal BMP 8-bit palette / header non-standar), baca manual byte BMP
+			InputStream rawIs = getContentResolver().openInputStream(uri);
+			if (rawIs == null) return null;
+			java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+			byte[] buf = new byte[4096];
+			int n;
+			while ((n = rawIs.read(buf)) != -1) baos.write(buf, 0, n);
+			rawIs.close();
+			byte[] data = baos.toByteArray();
+
+			if (data.length > 54 && data[0] == 'B' && data[1] == 'M') {
+				int dataOffset = (data[10] & 0xFF) | ((data[11] & 0xFF) << 8) | ((data[12] & 0xFF) << 16) | ((data[13] & 0xFF) << 24);
+				int width = (data[18] & 0xFF) | ((data[19] & 0xFF) << 8) | ((data[20] & 0xFF) << 16) | ((data[21] & 0xFF) << 24);
+				int height = (data[22] & 0xFF) | ((data[23] & 0xFF) << 8) | ((data[24] & 0xFF) << 16) | ((data[25] & 0xFF) << 24);
+				int bpp = (data[28] & 0xFF) | ((data[29] & 0xFF) << 8);
+
+				boolean topDown = height < 0;
+				int absH = Math.abs(height);
+				int[] pixels = new int[width * absH];
+
+				if (bpp == 24) {
+					int rowSize = ((width * 3 + 3) / 4) * 4;
+					for (int y = 0; y < absH; y++) {
+						int srcY = topDown ? y : (absH - 1 - y);
+						int rowStart = dataOffset + srcY * rowSize;
+						for (int x = 0; x < width; x++) {
+							int idx = rowStart + x * 3;
+							if (idx + 2 < data.length) {
+								int b = data[idx] & 0xFF;
+								int g = data[idx + 1] & 0xFF;
+								int r = data[idx + 2] & 0xFF;
+								pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+							}
+						}
+					}
+					return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+				} else if (bpp == 8) {
+					int headerSize = (data[14] & 0xFF) | ((data[15] & 0xFF) << 8) | ((data[16] & 0xFF) << 16) | ((data[17] & 0xFF) << 24);
+					int paletteOffset = 14 + headerSize;
+					int[] palette = new int[256];
+					for (int i = 0; i < 256; i++) {
+						int pIdx = paletteOffset + i * 4;
+						if (pIdx + 2 < data.length) {
+							int b = data[pIdx] & 0xFF;
+							int g = data[pIdx + 1] & 0xFF;
+							int r = data[pIdx + 2] & 0xFF;
+							palette[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+						}
+					}
+					int rowSize = ((width + 3) / 4) * 4;
+					for (int y = 0; y < absH; y++) {
+						int srcY = topDown ? y : (absH - 1 - y);
+						int rowStart = dataOffset + srcY * rowSize;
+						for (int x = 0; x < width; x++) {
+							int idx = rowStart + x;
+							if (idx < data.length) {
+								pixels[y * width + x] = palette[data[idx] & 0xFF];
+							}
+						}
+					}
+					return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+	
     @Override
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		super.onActivityResult(requestCode, resultCode, data);
@@ -843,10 +882,10 @@ public class MainActivity extends Activity {
 			
 			if (requestCode == REQUEST_PICK_TEXTURE) {
 				try {
+					
 					InputStream inputStream = getContentResolver().openInputStream(uri);
-					BitmapFactory.Options options = new BitmapFactory.Options();
-					options.inScaled = false;
-					final Bitmap bitmap = BitmapFactory.decodeStream(inputStream, null, options);
+					
+					final Bitmap bitmap = decodeBitmapSafe(uri);
 					if (inputStream != null) inputStream.close();
 
 					if (bitmap != null) {
@@ -881,8 +920,41 @@ public class MainActivity extends Activity {
 								try {
 									InputStream is = getContentResolver().openInputStream(uri);
 									if (is != null) {
+										// 1. Load model utama (.obj / .3d / .mdl)
 										glView.getRenderer().replaceOrImportModelObject(is, path);
 										is.close();
+
+										// 2. Deteksi & load .mtl otomatis jika ekstensi file adalah .obj
+										EditorObject active = glView.getRenderer().getActiveObject();
+										if (active != null && active.name.toLowerCase().endsWith(".obj")) {
+											InputStream mtlStream = null;
+											String mtlName = active.name.replaceAll("(?i)\\.obj$", ".mtl");
+
+											// Cek Jalur A: Lewat File Path asli (misal /storage/emulated/0/.../aventador.mtl)
+											if (active.modelPath != null && !active.modelPath.isEmpty()) {
+												String mtlRealPath = active.modelPath.replaceAll("(?i)\\.obj$", ".mtl");
+												java.io.File mtlFile = new java.io.File(mtlRealPath);
+												if (mtlFile.exists() && mtlFile.canRead()) {
+													mtlStream = new java.io.FileInputStream(mtlFile);
+												}
+											}
+
+											// Cek Jalur B (Cadangan): Ganti ekstensi langsung di string Uri content://
+											if (mtlStream == null && path.toLowerCase().endsWith(".obj")) {
+												try {
+													String mtlUriStr = path.replaceAll("(?i)\\.obj$", ".mtl");
+													mtlStream = getContentResolver().openInputStream(Uri.parse(mtlUriStr));
+												} catch (Exception ignored) {}
+											}
+
+											// Jika file .mtl ditemukan dan bisa dibuka, langsung terapkan warnanya!
+											if (mtlStream != null) {
+												active.applyMTLFromStream(mtlStream, mtlName);
+												active.mtlStatus = active.mesh.lastMtlStatus;
+												mtlStream.close();
+											}
+										}
+
 										runOnUiThread(new Runnable() {
 												@Override
 												public void run() {
@@ -896,7 +968,7 @@ public class MainActivity extends Activity {
 									}
 								} catch (Exception e) {
 									e.printStackTrace();
-									final Exception a=e;
+									final Exception a = e;
 									runOnUiThread(new Runnable() {
 											@Override
 											public void run() {
@@ -909,41 +981,9 @@ public class MainActivity extends Activity {
 				} catch (Exception e) {
 					Toast.makeText(this, "Error akses file model: " + e.getMessage(), Toast.LENGTH_SHORT).show();
 				}
-			} 
-			// 3. EXPORT FILE (FOLDER PICKER SAF)
-			else if (requestCode == 103) {
-				try {
-					java.io.OutputStream os = getContentResolver().openOutputStream(uri);
-					if (os != null) {
-						EditorObject active = glView.getRenderer().getActiveObject();
-						if (active != null) {
-							String ext = pendingExportFormat.replace(".", "");
-
-							java.io.File tempFile = new java.io.File(getCacheDir(), "temp_export" + pendingExportFormat);
-							active.mesh.exportToFile(tempFile, ext);
-
-							java.io.FileInputStream fis = new java.io.FileInputStream(tempFile);
-							byte[] buffer = new byte[1024];
-							int length;
-							while ((length = fis.read(buffer)) > 0) {
-								os.write(buffer, 0, length);
-							}
-							os.flush();
-							os.close();
-							fis.close();
-							tempFile.delete();
-
-							Toast.makeText(this, "Berhasil disimpan ke folder pilihan!", Toast.LENGTH_LONG).show();
-						}
-					}
-				} catch (Exception e) {
-					e.printStackTrace();
-					Toast.makeText(this, "Gagal menyimpan file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-				}
 			}
 		}
 	}
-	
 
     @Override
     protected void onPause() {

@@ -5,6 +5,7 @@ import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -12,7 +13,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class MeshModel {
     public List<float[]> vertices = new ArrayList<>();
@@ -21,12 +24,20 @@ public class MeshModel {
     public List<int[]> triangles = new ArrayList<>();
     public List<int[]> uvTriangles = new ArrayList<>();
     public List<int[]> normalTriangles = new ArrayList<>();
-	public List<float[]> vertexColors = new ArrayList<>();
+    public List<float[]> vertexColors = new ArrayList<>();
+    public List<float[]> faceColors = new ArrayList<>();
+	public List<String> faceMaterialNames = new ArrayList<>();
 
     private FloatBuffer vertexBuffer;
     private FloatBuffer uvBuffer;
     private FloatBuffer normalBuffer;
+    private FloatBuffer colorBuffer;
+	private FloatBuffer lineBuffer;
+	private int lineVertexCount = 0;
+	
 
+    private int vertexColorHandle;
+    private int uHasVertexColorHandle;
     private int program;
     private int positionHandle;
     private int normalHandle;
@@ -36,57 +47,78 @@ public class MeshModel {
     private int modelMatrixHandle;
     private int uTextureHandle;
     private int uUseTextureHandle;
-    private int uLightDirHandle; 
+    private int uLightDirHandle;
 
     private int pointProgram;
     private int pPositionHandle;
     private int pMVPMatrixHandle;
     private int pColorHandle;
     private int pPointSizeHandle;
+	private int uRgbWireframeHandle;
+	
 
-    public boolean isCCWMode = true; 
-    private boolean hasNormalsInFile = false;
+    public boolean isCCWMode = true;
+    public boolean hasVertexColors = false;
+    public boolean hasMtlColors = false;
+	
+	public String lastMtlStatus = "No MTL";
 
-    // 1. Vertex Shader: Normal ditransformasikan terhadap uMVPMatrix
-    private final String vertexShaderCode =
+	private final String vertexShaderCode =
 	"uniform mat4 uMVPMatrix;\n" +
 	"uniform mat4 uModelMatrix;\n" +
 	"attribute vec4 aPosition;\n" +
 	"attribute vec2 aTexCoord;\n" +
 	"attribute vec3 aNormal;\n" +
+	"attribute vec3 aVertexColor;\n" +
 	"varying vec2 vTexCoord;\n" +
 	"varying vec3 vNormal;\n" +
+	"varying vec3 vVertexColor;\n" +
+	"varying vec3 vLocalPos;\n" + 
 	"void main() {\n" +
 	"  gl_Position = uMVPMatrix * aPosition;\n" +
 	"  vTexCoord = aTexCoord;\n" +
 	"  vNormal = normalize(mat3(uMVPMatrix) * aNormal);\n" +
+	"  vVertexColor = aVertexColor;\n" +
+	"  vLocalPos = aPosition.xyz;\n" +
 	"}\n";
 
-    // 2. Fragment Shader: Bypass lighting jika memakai tekstur agar warna asli 100% keluar
     private final String fragmentShaderCode =
 	"precision mediump float;\n" +
 	"varying vec2 vTexCoord;\n" +
 	"varying vec3 vNormal;\n" +
+	"varying vec3 vVertexColor;\n" +
+	"varying vec3 vLocalPos;\n" +
 	"uniform sampler2D uTexture;\n" +
 	"uniform int uUseTexture;\n" +
+	"uniform int uHasVertexColor;\n" +
+	"uniform int uRgbWireframe;\n" + 
 	"uniform vec4 uColor;\n" +
 	"uniform vec3 uLightDir;\n" +
 	"void main() {\n" +
+	"  if (uRgbWireframe == 1) {\n" +
+	"    // Gradasi warna RGB cerah berdasarkan koordinat XYZ model\n" +
+	"    vec3 rgb = 0.5 + 0.5 * sin(vLocalPos * 3.0 + vec3(0.0, 2.094, 4.188));\n" +
+	"    gl_FragColor = vec4(rgb, 1.0);\n" +
+	"    return;\n" +
+	"  }\n" +
+	"  \n" +
 	"  vec3 norm = normalize(vNormal);\n" +
 	"  vec3 lightDir = normalize(uLightDir);\n" +
 	"  float diff = max(dot(norm, lightDir), 0.0);\n" +
-	"  \n" +
-	"  // AMBIENT LIGHTING TINGGI: Paling gelap tetap 75% terang, paling terang 100%\n" +
 	"  float intensity = 0.75 + (0.25 * diff);\n" +
 	"  \n" +
 	"  if (uUseTexture == 1) {\n" +
 	"    vec4 texColor = texture2D(uTexture, vTexCoord);\n" +
-	"    // KUNCI: Warna tekstur dikali intensity lembut (tidak langsung digelapkan total)\n" +
-	"    gl_FragColor = vec4(texColor.rgb * intensity, texColor.a);\n" +
+	"    vec3 baseRgb = (uHasVertexColor == 1) ? (texColor.rgb * vVertexColor) : texColor.rgb;\n" +
+	"    gl_FragColor = vec4(baseRgb * intensity, texColor.a);\n" +
+	"  } else if (uHasVertexColor == 1) {\n" +
+	"    gl_FragColor = vec4(vVertexColor * intensity, 1.0);\n" +
 	"  } else {\n" +
 	"    gl_FragColor = vec4(uColor.rgb * intensity, uColor.a);\n" +
 	"  }\n" +
 	"}\n";
+	
+	
 
     private final String pointVertexShaderCode =
 	"uniform mat4 uMVPMatrix;\n" +
@@ -110,12 +142,14 @@ public class MeshModel {
         vertices.add(new float[]{x, y, z});
         texCoords.add(new float[]{u, v});
         normals.add(new float[]{0.0f, 1.0f, 0.0f});
+        vertexColors.add(new float[]{1.0f, 1.0f, 1.0f});
     }
 
     public int addNewVertex(float x, float y, float z) {
         vertices.add(new float[]{x, y, z});
         texCoords.add(new float[]{0.5f, 0.5f});
         normals.add(new float[]{0.0f, 1.0f, 0.0f});
+        vertexColors.add(new float[]{1.0f, 1.0f, 1.0f});
         updateBuffers();
         return vertices.size() - 1;
     }
@@ -132,6 +166,7 @@ public class MeshModel {
         vertices.add(new float[]{newX, newY, newZ});
         texCoords.add(new float[]{uvBase[0], uvBase[1]});
         normals.add(new float[]{0.0f, 1.0f, 0.0f});
+        vertexColors.add(new float[]{1.0f, 1.0f, 1.0f});
 
         int newIndex = vertices.size() - 1;
         triangles.add(new int[]{selectedIndex, newIndex, (selectedIndex + 1) % vertices.size()});
@@ -159,6 +194,10 @@ public class MeshModel {
         uTextureHandle = GLES20.glGetUniformLocation(program, "uTexture");
         uUseTextureHandle = GLES20.glGetUniformLocation(program, "uUseTexture");
         uLightDirHandle = GLES20.glGetUniformLocation(program, "uLightDir");
+        vertexColorHandle = GLES20.glGetAttribLocation(program, "aVertexColor");
+        uHasVertexColorHandle = GLES20.glGetUniformLocation(program, "uHasVertexColor");
+		uRgbWireframeHandle = GLES20.glGetUniformLocation(program, "uRgbWireframe");
+		
 
         int pVertexShader = loadShader(GLES20.GL_VERTEX_SHADER, pointVertexShaderCode);
         int pFragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, pointFragmentShaderCode);
@@ -229,11 +268,14 @@ public class MeshModel {
         List<Float> finalVerts = new ArrayList<>();
         List<Float> finalUvs = new ArrayList<>();
         List<Float> finalNorms = new ArrayList<>();
+        List<Float> finalColors = new ArrayList<>();
 
         for (int i = 0; i < triangles.size(); i++) {
             int[] tri = triangles.get(i);
             int[] uvTri = (i < uvTriangles.size() && uvTriangles.get(i) != null) ? uvTriangles.get(i) : tri;
             int[] normTri = (i < normalTriangles.size() && normalTriangles.get(i) != null) ? normalTriangles.get(i) : tri;
+
+            float[] triMtlColor = (hasMtlColors && i < faceColors.size()) ? faceColors.get(i) : null;
 
             for (int j = 0; j < 3; j++) {
                 // 1. Vertex Position
@@ -268,8 +310,45 @@ public class MeshModel {
                 } else {
                     finalNorms.add(0f); finalNorms.add(1f); finalNorms.add(0f);
                 }
+
+                // 4. Colors (Wajib 1 warna per sudut segitiga -> 3x per triangle)
+                if (triMtlColor != null) {
+                    finalColors.add(triMtlColor[0]);
+                    finalColors.add(triMtlColor[1]);
+                    finalColors.add(triMtlColor[2]);
+                } else if (vIdx >= 0 && vIdx < vertexColors.size()) {
+                    float[] c = vertexColors.get(vIdx);
+                    finalColors.add(c[0]);
+                    finalColors.add(c[1]);
+                    finalColors.add(c[2]);
+                } else {
+                    finalColors.add(1.0f); finalColors.add(1.0f); finalColors.add(1.0f);
+                }
             }
         }
+		
+		List<Float> finalLines = new ArrayList<>(triangles.size() * 18);
+		for (int[] tri : triangles) {
+			if (tri[0] >= vertices.size() || tri[1] >= vertices.size() || tri[2] >= vertices.size()) continue;
+			float[] v0 = vertices.get(tri[0]);
+			float[] v1 = vertices.get(tri[1]);
+			float[] v2 = vertices.get(tri[2]);
+
+			// Garis v0 -> v1
+			finalLines.add(v0[0]); finalLines.add(v0[1]); finalLines.add(v0[2]);
+			finalLines.add(v1[0]); finalLines.add(v1[1]); finalLines.add(v1[2]);
+			// Garis v1 -> v2
+			finalLines.add(v1[0]); finalLines.add(v1[1]); finalLines.add(v1[2]);
+			finalLines.add(v2[0]); finalLines.add(v2[1]); finalLines.add(v2[2]);
+			// Garis v2 -> v0
+			finalLines.add(v2[0]); finalLines.add(v2[1]); finalLines.add(v2[2]);
+			finalLines.add(v0[0]); finalLines.add(v0[1]); finalLines.add(v0[2]);
+		}
+
+		lineVertexCount = finalLines.size() / 3;
+		lineBuffer = ByteBuffer.allocateDirect(finalLines.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+		for (float f : finalLines) lineBuffer.put(f);
+		lineBuffer.position(0);
 
         vertexBuffer = ByteBuffer.allocateDirect(finalVerts.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         for (float f : finalVerts) vertexBuffer.put(f);
@@ -282,6 +361,12 @@ public class MeshModel {
         normalBuffer = ByteBuffer.allocateDirect(finalNorms.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         for (float f : finalNorms) normalBuffer.put(f);
         normalBuffer.position(0);
+
+        colorBuffer = ByteBuffer.allocateDirect(finalColors.size() * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        for (float f : finalColors) colorBuffer.put(f);
+        colorBuffer.position(0);
+		
+		
     }
 
     public void draw(float[] mvpMatrix, float[] modelMatrix, int textureId, int selectedVertexIndex, boolean isEditMode) {
@@ -298,6 +383,10 @@ public class MeshModel {
         if (uLightDirHandle != -1) {
             GLES20.glUniform3f(uLightDirHandle, 0.0f, 1.0f, 1.0f);
         }
+		
+		if (uRgbWireframeHandle != -1) {
+            GLES20.glUniform1i(uRgbWireframeHandle, 0);
+        }
 
         GLES20.glEnableVertexAttribArray(positionHandle);
         GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, vertexBuffer);
@@ -308,14 +397,28 @@ public class MeshModel {
         GLES20.glEnableVertexAttribArray(textureCoordHandle);
         GLES20.glVertexAttribPointer(textureCoordHandle, 2, GLES20.GL_FLOAT, false, 0, uvBuffer);
 
+        boolean validColorBuf = (hasVertexColors && colorBuffer != null && colorBuffer.capacity() == vertexBuffer.capacity() && vertexColorHandle != -1);
+        if (validColorBuf) {
+            GLES20.glEnableVertexAttribArray(vertexColorHandle);
+            GLES20.glVertexAttribPointer(vertexColorHandle, 3, GLES20.GL_FLOAT, false, 0, colorBuffer);
+        }
+
         if (textureId > 0) {
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
             GLES20.glUniform1i(uTextureHandle, 0);
             GLES20.glUniform1i(uUseTextureHandle, 1);
+            if (uHasVertexColorHandle != -1) {
+                GLES20.glUniform1i(uHasVertexColorHandle, validColorBuf ? 1 : 0);
+            }
         } else {
             GLES20.glUniform1i(uUseTextureHandle, 0);
-            GLES20.glUniform4f(colorHandle, 0.75f, 0.75f, 0.8f, 1.0f);
+            if (validColorBuf) {
+                if (uHasVertexColorHandle != -1) GLES20.glUniform1i(uHasVertexColorHandle, 1);
+            } else {
+                if (uHasVertexColorHandle != -1) GLES20.glUniform1i(uHasVertexColorHandle, 0);
+                GLES20.glUniform4f(colorHandle, 0.75f, 0.75f, 0.8f, 1.0f);
+            }
         }
 
         GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL);
@@ -323,68 +426,100 @@ public class MeshModel {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size() * 3);
         GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL);
 
-        if (isEditMode) {
+		if (isEditMode && lineBuffer != null && lineVertexCount > 0) {
             GLES20.glUniform1i(uUseTextureHandle, 0);
+            if (uHasVertexColorHandle != -1) GLES20.glUniform1i(uHasVertexColorHandle, 0);
             GLES20.glUniform4f(colorHandle, 1.0f, 0.55f, 0.0f, 1.0f);
-            for (int[] tri : triangles) {
-                float[] lineVerts = {
-                    vertices.get(tri[0])[0], vertices.get(tri[0])[1], vertices.get(tri[0])[2],
-                    vertices.get(tri[1])[0], vertices.get(tri[1])[1], vertices.get(tri[1])[2],
-                    vertices.get(tri[1])[0], vertices.get(tri[1])[1], vertices.get(tri[1])[2],
-                    vertices.get(tri[2])[0], vertices.get(tri[2])[1], vertices.get(tri[2])[2],
-                    vertices.get(tri[2])[0], vertices.get(tri[2])[1], vertices.get(tri[2])[2],
-                    vertices.get(tri[0])[0], vertices.get(tri[0])[1], vertices.get(tri[0])[2]
-                };
-                ByteBuffer lbb = ByteBuffer.allocateDirect(lineVerts.length * 4);
-                lbb.order(ByteOrder.nativeOrder());
-                FloatBuffer lineBuf = lbb.asFloatBuffer();
-                lineBuf.put(lineVerts);
-                lineBuf.position(0);
+			if (uRgbWireframeHandle != -1) GLES20.glUniform1i(uRgbWireframeHandle, 1);
 
-                GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, lineBuf);
-                GLES20.glLineWidth(2.0f);
-                GLES20.glDrawArrays(GLES20.GL_LINES, 0, 6);
-            }
+            GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 0, lineBuffer);
+            GLES20.glLineWidth(1.5f);
+            GLES20.glDrawArrays(GLES20.GL_LINES, 0, lineVertexCount);
+			if (uRgbWireframeHandle != -1) GLES20.glUniform1i(uRgbWireframeHandle, 0);
         }
+		
 
         GLES20.glDisableVertexAttribArray(positionHandle);
         GLES20.glDisableVertexAttribArray(normalHandle);
         GLES20.glDisableVertexAttribArray(textureCoordHandle);
-
-        if (isEditMode && pointProgram != 0) {
-            GLES20.glUseProgram(pointProgram);
-            GLES20.glUniformMatrix4fv(pMVPMatrixHandle, 1, false, mvpMatrix, 0);
-            GLES20.glEnableVertexAttribArray(pPositionHandle);
-
-            float[] vCoords = new float[vertices.size() * 3];
-            for (int i = 0; i < vertices.size(); i++) {
-                float[] v = vertices.get(i);
-                vCoords[i * 3] = v[0];
-                vCoords[i * 3 + 1] = v[1];
-                vCoords[i * 3 + 2] = v[2];
-            }
-            ByteBuffer pbb = ByteBuffer.allocateDirect(vCoords.length * 4);
-            pbb.order(ByteOrder.nativeOrder());
-            FloatBuffer ptBuf = pbb.asFloatBuffer();
-            ptBuf.put(vCoords).position(0);
-
-            GLES20.glVertexAttribPointer(pPositionHandle, 3, GLES20.GL_FLOAT, false, 0, ptBuf);
-
-            GLES20.glUniform4f(pColorHandle, 1.0f, 0.5f, 0.0f, 1.0f);
-            GLES20.glUniform1f(pPointSizeHandle, 14.0f);
-            GLES20.glDrawArrays(GLES20.GL_POINTS, 0, vertices.size());
-
-            if (selectedVertexIndex >= 0 && selectedVertexIndex < vertices.size()) {
-                GLES20.glUniform4f(pColorHandle, 1.0f, 0.0f, 0.0f, 1.0f);
-                GLES20.glUniform1f(pPointSizeHandle, 20.0f);
-                GLES20.glDrawArrays(GLES20.GL_POINTS, selectedVertexIndex, 1);
-            }
-
-            GLES20.glDisableVertexAttribArray(pPositionHandle);
+        if (vertexColorHandle != -1) {
+            GLES20.glDisableVertexAttribArray(vertexColorHandle);
         }
+
+		if (isEditMode && pointProgram != 0) {
+            if (selectedVertexIndex >= 0 && selectedVertexIndex < vertices.size()) {
+                GLES20.glUseProgram(pointProgram);
+                GLES20.glUniformMatrix4fv(pMVPMatrixHandle, 1, false, mvpMatrix, 0);
+                GLES20.glEnableVertexAttribArray(pPositionHandle);
+
+                float[] selV = vertices.get(selectedVertexIndex);
+                float[] singlePt = new float[]{ selV[0], selV[1], selV[2] };
+
+                ByteBuffer pbb = ByteBuffer.allocateDirect(12); 
+                pbb.order(ByteOrder.nativeOrder());
+                FloatBuffer ptBuf = pbb.asFloatBuffer();
+                ptBuf.put(singlePt).position(0);
+
+                GLES20.glVertexAttribPointer(pPositionHandle, 3, GLES20.GL_FLOAT, false, 0, ptBuf);
+
+                GLES20.glUniform4f(pColorHandle, 1.0f, 0.0f, 0.0f, 1.0f); 
+                GLES20.glUniform1f(pPointSizeHandle, 20.0f);
+                GLES20.glDrawArrays(GLES20.GL_POINTS, 0, 1);
+
+                GLES20.glDisableVertexAttribArray(pPositionHandle);
+            }
+        }
+		
     }
 
-	public void importFromFile(InputStream inputStream, String fileName) throws Exception {
+    private Map<String, float[]> parseMTLFile(File mtlFile) throws Exception {
+        Map<String, float[]> materials = new HashMap<>();
+        if (mtlFile == null || !mtlFile.exists()) return materials;
+
+        BufferedReader reader = new BufferedReader(new FileReader(mtlFile));
+        String line;
+        String currentMtl = null;
+
+        while ((line = reader.readLine()) != null) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+
+            int commentIdx = line.indexOf('#');
+            if (commentIdx != -1) {
+                line = line.substring(0, commentIdx).trim();
+            }
+            if (line.isEmpty()) continue;
+
+            String[] tokens = line.split("\\s+");
+            if (tokens.length == 0) continue;
+
+            if (tokens[0].equalsIgnoreCase("newmtl") && tokens.length >= 2) {
+                currentMtl = line.substring(line.indexOf(' ') + 1).trim();
+            } else if (tokens[0].equalsIgnoreCase("Kd") && tokens.length >= 4 && currentMtl != null) {
+                try {
+                    float r = Float.parseFloat(tokens[1]);
+                    float g = Float.parseFloat(tokens[2]);
+                    float b = Float.parseFloat(tokens[3]);
+                    materials.put(currentMtl, new float[]{r, g, b});
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        reader.close();
+        return materials;
+    }
+
+    public void importFromFile(InputStream inputStream, String fileName) throws Exception {
+        String parentPath = null;
+        String pureName = fileName;
+        if (fileName != null && fileName.contains("/")) {
+            File f = new File(fileName);
+            if (f.getParentFile() != null) parentPath = f.getParentFile().getAbsolutePath();
+            pureName = f.getName();
+        }
+        importFromFile(inputStream, pureName, parentPath);
+    }
+
+    public void importFromFile(InputStream inputStream, String fileName, String parentDir) throws Exception {
         if (fileName != null && fileName.toLowerCase().endsWith(".mdl")) {
             importFromBinaryMDL(inputStream);
             return;
@@ -396,6 +531,10 @@ public class MeshModel {
         triangles.clear();
         uvTriangles.clear();
         normalTriangles.clear();
+        vertexColors.clear();
+        faceColors.clear();
+        hasVertexColors = false;
+        hasMtlColors = false;
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
         String line;
@@ -404,13 +543,19 @@ public class MeshModel {
         List<float[]> rawVT = new ArrayList<>();
         List<int[]> rawFaces = new ArrayList<>();
         List<int[]> rawUVFaces = new ArrayList<>();
+        List<float[]> rawVC = new ArrayList<>();
+        List<float[]> rawFaceColors = new ArrayList<>();
+
+        Map<String, float[]> mtlColors = new HashMap<>();
+        float[] activeMtlColor = new float[]{0.75f, 0.75f, 0.8f};
+        boolean foundMtlColor = false;
+        boolean foundActualVC = false;
         boolean hasExplicitUVIndex = false;
 
         while ((line = reader.readLine()) != null) {
             line = line.trim();
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("NUM_")) continue;
 
-            // Hapus komentar di tengah/akhir baris (seperti # 1 (index 0) pada Aston Martin)
             int commentIdx = line.indexOf('#');
             if (commentIdx != -1) {
                 line = line.substring(0, commentIdx).trim();
@@ -422,14 +567,49 @@ public class MeshModel {
             String head = tokens[0].toLowerCase();
 
             try {
-                if (head.equals("v")) {
-                    // Ambil 3 koordinat pertama (x, y, z) — aman walau ada vertex color r g b di belakangnya
+                if (head.equals("mtllib") && tokens.length >= 2) {
+					String mtlName = line.substring(line.indexOf(' ') + 1).trim();
+					boolean loaded = false;
+					if (parentDir != null && !parentDir.isEmpty()) {
+						File mtlFile = new File(parentDir, mtlName);
+						if (mtlFile.exists() && mtlFile.canRead()) {
+							try {
+								java.util.Map<String, float[]> parsed = parseMTLFile(mtlFile);
+								mtlColors.putAll(parsed);
+								lastMtlStatus = "MTL Loaded (" + parsed.size() + " mat): " + mtlFile.getName();
+								loaded = true;
+							} catch (Exception ignored) {}
+						}
+					}
+				} else if (head.equals("usemtl") && tokens.length >= 2) {
+					String matName = line.substring(line.indexOf(' ') + 1).trim();
+					if (mtlColors.containsKey(matName)) {
+						activeMtlColor = mtlColors.get(matName);
+						foundMtlColor = true;
+					} else if (!mtlColors.isEmpty()) {
+						lastMtlStatus += " | Unmatched usemtl: " + matName;
+					}
+                } else if (head.equals("v")) {
                     if (tokens.length >= 4) {
                         rawV.add(new float[]{
 									 Float.parseFloat(tokens[1]),
 									 Float.parseFloat(tokens[2]),
 									 Float.parseFloat(tokens[3])
 								 });
+
+                        if (tokens.length >= 7) {
+                            float r = Float.parseFloat(tokens[4]);
+                            float g = Float.parseFloat(tokens[5]);
+                            float b = Float.parseFloat(tokens[6]);
+                            if (r > 1.0f || g > 1.0f || b > 1.0f) {
+                                r /= 255.0f; g /= 255.0f; b /= 255.0f;
+                            }
+                            rawVC.add(new float[]{r, g, b});
+                            boolean isDummy = (r == 0f && g == 0f && b == 0f) || (r == 1f && g == 1f && b == 1f);
+                            if (!isDummy) foundActualVC = true;
+                        } else {
+                            rawVC.add(new float[]{1.0f, 1.0f, 1.0f});
+                        }
                     }
                 } else if (head.equals("vt")) {
                     if (tokens.length >= 3) {
@@ -458,10 +638,10 @@ public class MeshModel {
                             }
                         }
 
-                        // Fan Triangulation (mendukung Triangle, Quad 4 titik, & N-Gon)
                         for (int i = 1; i < polyCount - 1; i++) {
                             rawFaces.add(new int[]{polyV[0], polyV[i], polyV[i + 1]});
                             rawUVFaces.add(new int[]{polyUV[0], polyUV[i], polyUV[i + 1]});
+                            rawFaceColors.add(new float[]{activeMtlColor[0], activeMtlColor[1], activeMtlColor[2]});
                         }
                     }
                 }
@@ -471,9 +651,6 @@ public class MeshModel {
 
         if (rawV.isEmpty()) return;
 
-        // ------------------------------------------------------------------
-        // 1. AUTO-NORMALIZE & CENTER (Untuk OBJ berskala ratusan)
-        // ------------------------------------------------------------------
         float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE;
         float minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
         float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
@@ -492,19 +669,21 @@ public class MeshModel {
         float centerZ = (minZ + maxZ) * 0.5f;
 
         float maxDimension = Math.max(maxX - minX, Math.max(maxY - minY, maxZ - minZ));
-        float scaleFactor = 1.0f;
-        boolean shouldNormalize = (maxDimension > 3.0f || (maxDimension > 0.0001f && maxDimension < 0.1f));
+        float scaleFactor = 2.6f;
+        boolean shouldNormalize = (maxDimension > 3.5f || (maxDimension > 0.0001f && maxDimension < 0.2f));
         if (shouldNormalize) {
-            scaleFactor = 1.5f / maxDimension;
+            scaleFactor = 2.6f / maxDimension;
         }
 
-        for (float[] v : rawV) {
+        for (int i = 0; i < rawV.size(); i++) {
+            float[] v = rawV.get(i);
             float vx = shouldNormalize ? (v[0] - centerX) * scaleFactor : v[0];
             float vy = shouldNormalize ? (v[1] - centerY) * scaleFactor : v[1];
             float vz = shouldNormalize ? (v[2] - centerZ) * scaleFactor : v[2];
 
             vertices.add(new float[]{vx, vy, vz});
             normals.add(new float[]{0.0f, 1.0f, 0.0f});
+            vertexColors.add(i < rawVC.size() ? rawVC.get(i) : new float[]{1.0f, 1.0f, 1.0f});
         }
 
         for (float[] vt : rawVT) {
@@ -514,9 +693,6 @@ public class MeshModel {
             texCoords.add(new float[]{0.5f, 0.5f});
         }
 
-        // ------------------------------------------------------------------
-        // 2. DETEKSI AKURAT 0-BASED VS 1-BASED
-        // ------------------------------------------------------------------
         boolean hasZeroVertexIndex = false;
         for (int[] f : rawFaces) {
             if (f[0] == 0 || f[1] == 0 || f[2] == 0) {
@@ -535,9 +711,6 @@ public class MeshModel {
         }
         int uvOffset = (hasExplicitUVIndex && !hasZeroUVIndex) ? 1 : 0;
 
-        // ------------------------------------------------------------------
-        // 3. RAKIT TRIANGLE & UV BUFFER
-        // ------------------------------------------------------------------
         for (int i = 0; i < rawFaces.size(); i++) {
             int[] f = rawFaces.get(i);
             int[] uvf = rawUVFaces.get(i);
@@ -552,7 +725,6 @@ public class MeshModel {
                 uv1 = (uvf[1] < 0) ? (rawVT.size() + uvf[1]) : (uvf[1] - uvOffset);
                 uv2 = (uvf[2] < 0) ? (rawVT.size() + uvf[2]) : (uvf[2] - uvOffset);
             } else {
-                // Jika tidak ada slash (misal file 0-based: f 0 1 7), UV ikut indeks vertex
                 uv0 = v0;
                 uv1 = v1;
                 uv2 = v2;
@@ -577,13 +749,18 @@ public class MeshModel {
                 triangles.add(tri);
                 uvTriangles.add(uvTri);
                 normalTriangles.add(tri);
+                if (i < rawFaceColors.size()) {
+                    faceColors.add(rawFaceColors.get(i));
+                }
             }
         }
+
+        this.hasMtlColors = foundMtlColor;
+        this.hasVertexColors = foundMtlColor || foundActualVC;
 
         recalculateNormals();
         updateBuffers();
     }
-	
 
     public void switchWindingMode() {
         isCCWMode = !isCCWMode;
@@ -617,6 +794,10 @@ public class MeshModel {
         triangles.clear();
         uvTriangles.clear();
         normalTriangles.clear();
+        vertexColors.clear();
+        faceColors.clear();
+        hasVertexColors = false;
+        hasMtlColors = false;
 
         byte[] header = new byte[4];
         inputStream.read(header, 0, 4);
@@ -656,6 +837,7 @@ public class MeshModel {
             vertices.add(new float[]{x, y, z});
             texCoords.add(new float[]{u, v});
             normals.add(new float[]{nx, ny, nz});
+            vertexColors.add(new float[]{1.0f, 1.0f, 1.0f});
         }
 
         if (hasF) {
@@ -742,9 +924,9 @@ public class MeshModel {
             int[] norm = (i < normalTriangles.size()) ? normalTriangles.get(i) : new int[]{0, 0, 0};
 
             writer.write(String.format("f %d/%d/%d %d/%d/%d %d/%d/%d\n", 
-									   tri[0]+1, uv[0]+1, norm[0]+1, 
-									   tri[1]+1, uv[1]+1, norm[1]+1, 
-									   tri[2]+1, uv[2]+1, norm[2]+1));
+                                       tri[0]+1, uv[0]+1, norm[0]+1, 
+                                       tri[1]+1, uv[1]+1, norm[1]+1, 
+                                       tri[2]+1, uv[2]+1, norm[2]+1));
         }
         writer.close();
     }

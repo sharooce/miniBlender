@@ -39,6 +39,21 @@ public class MyGLSurfaceView extends GLSurfaceView {
     public MyGLRenderer getRenderer() {
         return renderer;
     }
+	public void resetRoomView() {
+		renderer.rotX = 0.0f;
+		renderer.rotY = 0.0f;
+		renderer.scaleFactor = 1.0f;
+	}
+
+	public void zoomRoomIn() {
+		renderer.scaleFactor = Math.min(10.0f, renderer.scaleFactor * 1.2f);
+	}
+
+	public void zoomRoomOut() {
+		renderer.scaleFactor = Math.max(0.1f, renderer.scaleFactor * 0.8f);
+	}
+
+	private float initialPinchSpan = 0f;
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -46,101 +61,106 @@ public class MyGLSurfaceView extends GLSurfaceView {
 
         int action = event.getAction() & MotionEvent.ACTION_MASK;
         int pointerCount = event.getPointerCount();
-        float x = event.getX();
-        float y = event.getY();
+
+        float sumX = 0, sumY = 0;
+        for (int i = 0; i < pointerCount; i++) {
+            sumX += event.getX(i);
+            sumY += event.getY(i);
+        }
+        float focusX = sumX / pointerCount;
+        float focusY = sumY / pointerCount;
 
         switch (action) {
             case MotionEvent.ACTION_DOWN:
+                lastX = focusX;
+                lastY = focusY;
+                isMultiTouching = false;
+                initialPinchSpan = 0f;
+                break;
+
             case MotionEvent.ACTION_POINTER_DOWN:
-                lastX = x;
-                lastY = y;
-                isZooming = (pointerCount > 1);
-				if (pointerCount > 1) {
-                    isMultiTouching = true;
+                lastX = focusX;
+                lastY = focusY;
+                isMultiTouching = true;
+                if (pointerCount == 2) {
+                    initialPinchSpan = scaleDetector.getCurrentSpan();
                 }
-               
                 break;
 
             case MotionEvent.ACTION_MOVE:
-				float dx = x - lastX;
-				float dy = y - lastY;
-                if (pointerCount > 1 || scaleDetector.isInProgress()) {
-                    isZooming = true;
-                    lastX = x;
-                    lastY = y;
-                    return true;
-                }
-				if (pointerCount == 2 && !scaleDetector.isInProgress()) {
-					EditorObject active = renderer.getActiveObject();
-					if (active != null) {
-						// Sinkronkan rotasi dengan sudut kamera saat ini agar selaras
-						double rad = Math.toRadians(renderer.rotY);
-						float cos = (float) Math.cos(rad);
-						float sin = (float) Math.sin(rad);
+                float dx = focusX - lastX;
+                float dy = focusY - lastY;
 
-						active.rotY += (dx * cos - dy * sin) * 0.4f;
-						active.rotX += (dy * cos + dx * sin) * 0.4f;
-					}
-					requestRender();
-				}
-				// -------------------------------------------------------------
-				// 2. TIGA JARI (TRIPLE TOUCH): ROTATE ROOM / KAMERA
-				// -------------------------------------------------------------
-				else if (pointerCount >= 3) {
-					renderer.rotY += dx * 0.4f;
-					renderer.rotX += dy * 0.4f;
-					requestRender();
-				}
-
-                if (!isZooming) {
-                    
-
-                    if (renderer != null) {
+                if (renderer != null) {
+                    if (pointerCount == 1 && !isMultiTouching) {
+                        
                         if (renderer.currentTouchMode == renderer.TOUCH_MODE_ROOM) {
-                            // Mode 1: Rotasi Ruangan / Kamera
                             renderer.rotY += dx * 0.5f;
                             renderer.rotX += dy * 0.5f;
                         } 
                         else if (renderer.currentTouchMode == renderer.TOUCH_MODE_OBJ_MOVE) {
-                            // Mode 2: Move Objek (Aman dari Null)
                             EditorObject active = renderer.getActiveObject();
                             if (active != null) {
-                                active.offsetX += dx * 0.01f;
-                                active.offsetY -= dy * 0.01f;
+                                
+                                float moveSpeed = 0.01f / Math.max(0.5f, renderer.scaleFactor);
+                                active.offsetX += dx * moveSpeed;
+                                active.offsetY -= dy * moveSpeed;
                             }
                         } 
-                        else if (renderer.currentTouchMode == renderer.TOUCH_MODE_OBJ_ROT) {
-                            // Mode 3: Rotasi Objek Aktif
-                            EditorObject active = renderer.getActiveObject();
-                            if (active != null) {
-                                // Sinkronkan rotasi dengan arah pandang kamera saat ini
-                                double rad = Math.toRadians(renderer.rotY);
-                                float cos = (float) Math.cos(rad);
-                                float sin = (float) Math.sin(rad);
-
-                                active.rotY += (dx * cos - dy * sin) * 0.5f;
-                                active.rotX += (dy * cos + dx * sin) * 0.5f;
-                            }
+                        else if(renderer.currentTouchMode == renderer.TOUCH_MODE_OBJ_ROT) {
+                            renderer.rotateActiveObjectScreenAligned(dx, dy);
                         }
                         requestRender();
+                    } 
+                    else if (pointerCount == 2) {
+                      
+                        float currentSpan = scaleDetector.getCurrentSpan();
+                        boolean isPinching = Math.abs(currentSpan - initialPinchSpan) > 25.0f;
+
+                        if (!isPinching) {
+                            renderer.rotY += dx * 0.4f;
+                            renderer.rotX += dy * 0.4f;
+                            requestRender();
+                        }
+                    } 
+                    else if (pointerCount >= 3) {
+                        
+                        renderer.rotY += dx * 0.4f;
+                        renderer.rotX += dy * 0.4f;
+                        renderer.rotateActiveObjectScreenAligned(dx, dy);
+                        requestRender();
                     }
-                    lastX = x;
-                    lastY = y;
                 }
+
+                lastX = focusX;
+                lastY = focusY;
                 break;
 
             case MotionEvent.ACTION_POINTER_UP:
-                isZooming = true;
-                lastX = x;
-                lastY = y;
+                int upIndex = event.getActionIndex();
+                if (pointerCount > 1) {
+                    float remX = 0, remY = 0;
+                    for (int i = 0; i < pointerCount; i++) {
+                        if (i == upIndex) continue;
+                        remX += event.getX(i);
+                        remY += event.getY(i);
+                    }
+                    lastX = remX / (pointerCount - 1);
+                    lastY = remY / (pointerCount - 1);
+                }
                 break;
 
             case MotionEvent.ACTION_UP:
-                isZooming = false;
-                lastX = x;
-                lastY = y;
+            case MotionEvent.ACTION_CANCEL:
+                isMultiTouching = false;
+                initialPinchSpan = 0f;
+                lastX = focusX;
+                lastY = focusY;
                 break;
         }
         return true;
     }
+	
+	
+	
 }

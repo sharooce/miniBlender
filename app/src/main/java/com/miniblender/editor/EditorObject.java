@@ -15,6 +15,11 @@ public class EditorObject {
     public int selectedVertexIndex = 0;
     public int textureId = 0;
     public String texturePath = ""; 
+	public float[] rotationMatrix = new float[16];
+	public String modelPath = "";
+	public String mtlStatus = "No MTL";
+	public transient android.graphics.Bitmap pendingTextureBitmap = null;
+	
 
     public EditorObject(String name) {
         this.name = name;
@@ -26,6 +31,61 @@ public class EditorObject {
         this.name = "Object";
         this.mesh = new MeshModel();
     }
+	public void applyMTLFromStream(java.io.InputStream is, String mtlName) throws Exception {
+		if (is == null || mesh == null) return;
+
+		java.util.Map<String, float[]> parsed = new java.util.HashMap<>();
+		java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(is));
+		String line;
+		String currentMtl = null;
+
+		while ((line = reader.readLine()) != null) {
+			line = line.trim();
+			if (line.isEmpty() || line.startsWith("#")) continue;
+
+			int commentIdx = line.indexOf('#');
+			if (commentIdx != -1) line = line.substring(0, commentIdx).trim();
+			if (line.isEmpty()) continue;
+
+			String[] tokens = line.split("\\s+");
+			if (tokens.length == 0) continue;
+
+			if (tokens[0].equalsIgnoreCase("newmtl") && tokens.length >= 2) {
+				currentMtl = line.substring(line.indexOf(' ') + 1).trim();
+			} else if (tokens[0].equalsIgnoreCase("Kd") && tokens.length >= 4 && currentMtl != null) {
+				try {
+					float r = Float.parseFloat(tokens[1]);
+					float g = Float.parseFloat(tokens[2]);
+					float b = Float.parseFloat(tokens[3]);
+					parsed.put(currentMtl, new float[]{r, g, b});
+				} catch (NumberFormatException ignored) {}
+			}
+		}
+		reader.close();
+
+		if (parsed.isEmpty()) {
+			this.mtlStatus = "MTL Kosong / Tidak ada Kd: " + mtlName;
+			return;
+		}
+
+		mesh.faceColors.clear();
+		int matched = 0;
+		for (int i = 0; i < mesh.triangles.size(); i++) {
+			String mat = (i < mesh.faceMaterialNames.size()) ? mesh.faceMaterialNames.get(i) : "";
+			if (parsed.containsKey(mat)) {
+				mesh.faceColors.add(parsed.get(mat));
+				matched++;
+			} else {
+				mesh.faceColors.add(new float[]{0.75f, 0.75f, 0.8f});
+			}
+		}
+
+		mesh.hasMtlColors = (matched > 0);
+		mesh.hasVertexColors = (matched > 0);
+		this.mtlStatus = "MTL Loaded (" + parsed.size() + " mat, " + matched + " faces)";
+		mesh.updateBuffers();
+	}
+	
 
     // ==========================================
     // 1. FUNGSI SIMPAN OBJECT KE JSONOBJECT
@@ -43,8 +103,30 @@ public class EditorObject {
         root.put("rotZ", (double) rotZ);
         root.put("selectedVertexIndex", selectedVertexIndex);
         root.put("texturePath", texturePath);
+		root.put("modelPath", modelPath != null ? modelPath : "");
+		root.put("mtlStatus", mtlStatus != null ? mtlStatus : "No MTL");
+		
+		root.put("hasMtlColors", mesh.hasMtlColors);
 
-        // B. Simpan Mesh Vertices (v)
+		org.json.JSONArray fcArray = new org.json.JSONArray();
+		for (float[] fc : mesh.faceColors) {
+			org.json.JSONArray rgb = new org.json.JSONArray();
+			rgb.put(fc[0]);
+			rgb.put(fc[1]);
+			rgb.put(fc[2]);
+			fcArray.put(rgb);
+		}
+		root.put("faceColors", fcArray);
+		
+		
+		JSONArray rotMatArray = new JSONArray();
+		for (int i = 0; i < 16; i++) {
+			rotMatArray.put(rotationMatrix[i]);
+		}
+		// B. Simpan Matrix
+		root.put("rotationMatrix", rotMatArray);
+
+        // C. Simpan Mesh Vertices (v)
         JSONArray vArray = new JSONArray();
         for (float[] v : mesh.vertices) {
             JSONArray item = new JSONArray();
@@ -55,7 +137,7 @@ public class EditorObject {
         }
         root.put("vertices", vArray);
 
-        // C. Simpan UV Texture Coordinates (vt)
+        // D. Simpan UV Texture Coordinates (vt)
         JSONArray vtArray = new JSONArray();
         for (float[] vt : mesh.texCoords) {
             JSONArray item = new JSONArray();
@@ -65,7 +147,7 @@ public class EditorObject {
         }
         root.put("texCoords", vtArray);
 
-        // D. Simpan Normals (vn)
+        // E. Simpan Normals (vn)
         JSONArray vnArray = new JSONArray();
         for (float[] vn : mesh.normals) {
             JSONArray item = new JSONArray();
@@ -76,7 +158,7 @@ public class EditorObject {
         }
         root.put("normals", vnArray);
 
-        // E. Simpan Triangles (f - vertex indices)
+        // F. Simpan Triangles (f - vertex indices)
         JSONArray fArray = new JSONArray();
         for (int[] tri : mesh.triangles) {
             JSONArray item = new JSONArray();
@@ -87,7 +169,7 @@ public class EditorObject {
         }
         root.put("triangles", fArray);
 
-        // F. Simpan UV Triangles
+        // G. Simpan UV Triangles
         JSONArray uvFArray = new JSONArray();
         for (int[] uvTri : mesh.uvTriangles) {
             JSONArray item = new JSONArray();
@@ -98,7 +180,7 @@ public class EditorObject {
         }
         root.put("uvTriangles", uvFArray);
 
-        // G. Simpan Normal Triangles
+        // H. Simpan Normal Triangles
         JSONArray normFArray = new JSONArray();
         for (int[] normTri : mesh.normalTriangles) {
             JSONArray item = new JSONArray();
@@ -109,7 +191,7 @@ public class EditorObject {
         }
         root.put("normalTriangles", normFArray);
 
-        // H. Simpan Status Winding Mode Aktif
+        // I. Simpan Status Winding Mode Aktif
         root.put("isCCWMode", mesh.isCCWMode);
 
         return root;
@@ -136,6 +218,24 @@ public class EditorObject {
         this.rotZ = (float) root.optDouble("rotZ", 0.0);
         this.selectedVertexIndex = root.optInt("selectedVertexIndex", 0);
         this.texturePath = root.optString("texturePath", "");
+		this.modelPath = root.optString("modelPath", "");
+		this.mtlStatus = root.optString("mtlStatus", "No MTL");
+		mesh.hasMtlColors = root.optBoolean("hasMtlColors", false);
+		mesh.faceColors.clear();
+		org.json.JSONArray fcArray = root.optJSONArray("faceColors");
+		if (fcArray != null) {
+			for (int i = 0; i < fcArray.length(); i++) {
+				org.json.JSONArray rgb = fcArray.getJSONArray(i);
+				mesh.faceColors.add(new float[]{
+										(float) rgb.getDouble(0),
+										(float) rgb.getDouble(1),
+										(float) rgb.getDouble(2)
+									});
+			}
+		}
+		if (mesh.hasMtlColors && !mesh.faceColors.isEmpty()) {
+			mesh.hasVertexColors = true;
+		}
 
         // B. Baca Vertices
         if (root.has("vertices")) {
@@ -213,6 +313,16 @@ public class EditorObject {
 										 });
             }
         }
+		if (root.has("rotationMatrix")){
+			JSONArray rotMatArray = root.optJSONArray("rotationMatrix");
+			if (rotMatArray != null && rotMatArray.length() == 16) {
+				for (int i = 0; i < 16; i++) {
+					this.rotationMatrix[i] = (float) rotMatArray.getDouble(i);
+				}
+			} else {
+				android.opengl.Matrix.setIdentityM(this.rotationMatrix, 0);
+			}
+		}
 
         // H. Restore Winding Mode
         if (root.has("isCCWMode")) {
