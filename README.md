@@ -37,7 +37,7 @@
 
 | Edit Mode & RGB Wireframe | Multi-Part FBX Binary Import | Textured View Mode |
 | :---: | :---: | :---: |
-| ![Edit Mode](screenshots/edit_mode.jpg) | ![FBX Car](screenshots/fbx_import.jpg) | ![View Mode](screenshots/view_mode.jpg) | ![View Menu](screenshot/menu_view.jpg) |
+| ![Edit Mode](screenshots/edit_mode.jpg) | ![FBX Car](screenshots/fbx_import.jpg) | ![View Mode](screenshots/view_mode.jpg) | ![View Menu](screenshots/menu_view.jpg) |
 ---
 
 ## 🏗️ Architecture Overview
