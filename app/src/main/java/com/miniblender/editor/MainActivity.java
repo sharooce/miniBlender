@@ -101,7 +101,6 @@ public class MainActivity extends Activity {
         viewportContainer.addView(glView, new FrameLayout.LayoutParams(
 									  FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // --- 1. Overlay Info & Tombol Toggle Info ('i') di Pojok Kiri Atas ---
         tvOverlayInfo = new TextView(this);
         tvOverlayInfo.setTextColor(Color.parseColor("#00FFCC"));
         tvOverlayInfo.setTextSize(11f);
@@ -143,6 +142,28 @@ public class MainActivity extends Activity {
         infoParams.gravity = Gravity.TOP | Gravity.START;
         infoParams.setMargins(infoBtnSize + 32, 20, 20, 20);
         viewportContainer.addView(tvOverlayInfo, infoParams);
+		
+		android.widget.TextClock textClock = new android.widget.TextClock(this);
+        textClock.setFormat12Hour(null);
+        textClock.setFormat24Hour("HH:mm");
+        textClock.setTextColor(Color.parseColor("#00FFCC"));
+        textClock.setTextSize(12f);
+        textClock.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        textClock.setPadding(20, 12, 20, 12);
+
+        GradientDrawable clockBg = new GradientDrawable();
+        clockBg.setColor(Color.parseColor("#6618181F"));
+        clockBg.setCornerRadius(16f);
+        clockBg.setStroke(1, Color.parseColor("#4400FFCC"));
+        textClock.setBackground(clockBg);
+
+        FrameLayout.LayoutParams clockParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        clockParams.gravity = Gravity.TOP | Gravity.END;
+        clockParams.setMargins(0, 20, 20, 0); 
+        viewportContainer.addView(textClock, clockParams);
 
         btnToggleInfo.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -249,7 +270,6 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        // --- 3. Panel Kontrol Bawah (Glassmorphism + Horizontal Scroll) ---
         controlPanel = new LinearLayout(this);
         controlPanel.setOrientation(LinearLayout.VERTICAL);
         controlPanel.setPadding(10, 10, 10, 10);
@@ -519,6 +539,13 @@ public class MainActivity extends Activity {
         panelParams.gravity = Gravity.BOTTOM;
         panelParams.setMargins(12, 0, 12, 12);
         viewportContainer.addView(controlPanel, panelParams);
+		
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
 
         setContentView(viewportContainer);
         checkStoragePermission();
