@@ -29,6 +29,7 @@ import android.view.animation.TranslateAnimation;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -41,6 +42,7 @@ public class MainActivity extends Activity {
     private static final int REQUEST_PERMISSION_STORAGE = 100;
     private static final int REQUEST_PICK_TEXTURE = 101;
     private static final int REQUEST_PICK_MODEL = 102;
+    private static final int REQUEST_PICK_MTL = 103;
 
     private MyGLSurfaceView glView;
     private TextView tvOverlayInfo;
@@ -53,19 +55,33 @@ public class MainActivity extends Activity {
     private boolean isMenuExpanded = false;
     private String pendingExportFormat = ".3d";
     private boolean isInitialLaunch = true;
-	
+
+    private LinearLayout controlPanel;
+    private Button btnTogglePanel;
+    private boolean isControlPanelVisible = true;
+    private Button btnToggleInfo;
+    private boolean isOverlayInfoVisible = true;
+
     private ScaleGestureDetector scaleGestureDetector;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        LinearLayout mainLayout = new LinearLayout(this);
-        mainLayout.setOrientation(LinearLayout.VERTICAL);
+        getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(
+            new android.view.View.OnSystemUiVisibilityChangeListener() {
+                @Override
+                public void onSystemUiVisibilityChange(int visibility) {
+                    if ((visibility & android.view.View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
+                        enableFullscreen();
+                    }
+                }
+            }
+        );
+
+        final float density = getResources().getDisplayMetrics().density;
 
         FrameLayout viewportContainer = new FrameLayout(this);
-        LinearLayout.LayoutParams viewportParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
 
         glView = new MyGLSurfaceView(this);
 
@@ -81,53 +97,135 @@ public class MainActivity extends Activity {
 					return true;
 				}
 			});
-		
 
         viewportContainer.addView(glView, new FrameLayout.LayoutParams(
 									  FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
+        // --- 1. Overlay Info & Tombol Toggle Info ('i') di Pojok Kiri Atas ---
         tvOverlayInfo = new TextView(this);
         tvOverlayInfo.setTextColor(Color.parseColor("#00FFCC"));
         tvOverlayInfo.setTextSize(11f);
         tvOverlayInfo.setPadding(20, 14, 20, 14);
 
         GradientDrawable infoBg = new GradientDrawable();
-        infoBg.setColor(Color.parseColor("#B018181F"));
+        infoBg.setColor(Color.parseColor("#6618181F"));
         infoBg.setCornerRadius(16f);
+        infoBg.setStroke(1, Color.parseColor("#33FFFFFF"));
         tvOverlayInfo.setBackground(infoBg);
+
+        int infoBtnSize = (int) (32 * density);
+
+        btnToggleInfo = new Button(this);
+        btnToggleInfo.setText("i");
+        btnToggleInfo.setTextSize(12f);
+        btnToggleInfo.setAllCaps(false);
+        btnToggleInfo.setTextColor(Color.parseColor("#00FFCC"));
+        btnToggleInfo.setPadding(0, 0, 0, 0);
+        btnToggleInfo.setGravity(Gravity.CENTER);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btnToggleInfo.setBackgroundTintList(null);
+            btnToggleInfo.setStateListAnimator(null);
+        }
+
+        GradientDrawable infoBtnBg = new GradientDrawable();
+        infoBtnBg.setColor(Color.parseColor("#6618181F"));
+        infoBtnBg.setShape(GradientDrawable.OVAL);
+        infoBtnBg.setStroke(2, Color.parseColor("#4400FFCC"));
+        btnToggleInfo.setBackground(infoBtnBg);
+
+        FrameLayout.LayoutParams infoBtnParams = new FrameLayout.LayoutParams(infoBtnSize, infoBtnSize);
+        infoBtnParams.gravity = Gravity.TOP | Gravity.START;
+        infoBtnParams.setMargins(20, 20, 0, 0);
+        viewportContainer.addView(btnToggleInfo, infoBtnParams);
 
         FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        infoParams.setMargins(20, 20, 20, 20);
         infoParams.gravity = Gravity.TOP | Gravity.START;
+        infoParams.setMargins(infoBtnSize + 32, 20, 20, 20);
         viewportContainer.addView(tvOverlayInfo, infoParams);
+
+        btnToggleInfo.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					isOverlayInfoVisible = !isOverlayInfoVisible;
+					if (tvOverlayInfo != null) {
+						tvOverlayInfo.setVisibility(isOverlayInfoVisible ? View.VISIBLE : View.GONE);
+					}
+					btnToggleInfo.setAlpha(isOverlayInfoVisible ? 1.0f : 0.6f);
+				}
+			});
+
+        // --- 2. Grup Submenu (Atas) + Tombol Hide Panel & FAB (Bawah) di Pojok Kanan Bawah ---
+        int fabSize = (int) (52 * density);
+        int miniFabSize = (int) (44 * density);
+
+        final LinearLayout fabGroupContainer = new LinearLayout(this);
+        fabGroupContainer.setOrientation(LinearLayout.VERTICAL);
+        fabGroupContainer.setGravity(Gravity.END);
 
         floatingMenuContainer = createScrollableFloatingSubMenu();
         floatingMenuContainer.setVisibility(View.GONE);
+        LinearLayout.LayoutParams subMenuParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        subMenuParams.setMargins(0, 0, 0, (int) (10 * density));
+        fabGroupContainer.addView(floatingMenuContainer, subMenuParams);
 
-        FrameLayout.LayoutParams menuParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        menuParams.gravity = Gravity.BOTTOM | Gravity.END;
-        menuParams.setMargins(0, 0, 24, 150);
-        viewportContainer.addView(floatingMenuContainer, menuParams);
+        LinearLayout fabRow = new LinearLayout(this);
+        fabRow.setOrientation(LinearLayout.HORIZONTAL);
+        fabRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        btnTogglePanel = new Button(this);
+        btnTogglePanel.setText("▼");
+        btnTogglePanel.setTextSize(16f);
+        btnTogglePanel.setTextColor(Color.WHITE);
+        btnTogglePanel.setGravity(Gravity.CENTER);
+        btnTogglePanel.setPadding(0, 0, 0, 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btnTogglePanel.setBackgroundTintList(null);
+            btnTogglePanel.setStateListAnimator(null);
+        }
+
+        GradientDrawable toggleBg = new GradientDrawable();
+        toggleBg.setColor(Color.parseColor("#551E1E28"));
+        toggleBg.setShape(GradientDrawable.OVAL);
+        toggleBg.setStroke(2, Color.parseColor("#55FFFFFF"));
+        btnTogglePanel.setBackground(toggleBg);
+
+        LinearLayout.LayoutParams toggleBtnParams = new LinearLayout.LayoutParams(miniFabSize, miniFabSize);
+        toggleBtnParams.setMargins(0, 0, (int) (10 * density), 0);
+        fabRow.addView(btnTogglePanel, toggleBtnParams);
 
         btnMainFab = new Button(this);
         btnMainFab.setText("⚙");
         btnMainFab.setTextSize(20f);
         btnMainFab.setTextColor(Color.WHITE);
+        btnMainFab.setGravity(Gravity.CENTER);
+        btnMainFab.setPadding(0, 0, 0, 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btnMainFab.setBackgroundTintList(null);
+            btnMainFab.setStateListAnimator(null);
+        }
 
         GradientDrawable fabGradient = new GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
-            new int[]{Color.parseColor("#02AAB0"), Color.parseColor("#00CDAC")}
+            new int[]{applyAlpha("#02AAB0", 0x66), applyAlpha("#00CDAC", 0x66)}
         );
         fabGradient.setShape(GradientDrawable.OVAL);
+        fabGradient.setStroke(2, Color.parseColor("#66FFFFFF"));
         btnMainFab.setBackground(fabGradient);
 
-        int fabSize = (int) (52 * getResources().getDisplayMetrics().density);
-        FrameLayout.LayoutParams fabParams = new FrameLayout.LayoutParams(fabSize, fabSize);
-        fabParams.gravity = Gravity.BOTTOM | Gravity.END;
-        fabParams.setMargins(0, 0, 24, 24);
-        viewportContainer.addView(btnMainFab, fabParams);
+        fabRow.addView(btnMainFab, new LinearLayout.LayoutParams(fabSize, fabSize));
+        fabGroupContainer.addView(fabRow);
+
+        final FrameLayout.LayoutParams groupParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        groupParams.gravity = Gravity.BOTTOM | Gravity.END;
+        groupParams.setMargins(0, 0, 24, (int) (145 * density));
+        viewportContainer.addView(fabGroupContainer, groupParams);
 
         btnMainFab.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -136,14 +234,30 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        LinearLayout controlPanel = new LinearLayout(this);
+        btnTogglePanel.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					isControlPanelVisible = !isControlPanelVisible;
+					if (controlPanel != null) {
+						controlPanel.setVisibility(isControlPanelVisible ? View.VISIBLE : View.GONE);
+					}
+					btnTogglePanel.setText(isControlPanelVisible ? "▼" : "▲");
+
+					int bottomOffset = isControlPanelVisible ? (int) (145 * density) : 24;
+					groupParams.setMargins(0, 0, 24, bottomOffset);
+					fabGroupContainer.setLayoutParams(groupParams);
+				}
+			});
+
+        // --- 3. Panel Kontrol Bawah (Glassmorphism + Horizontal Scroll) ---
+        controlPanel = new LinearLayout(this);
         controlPanel.setOrientation(LinearLayout.VERTICAL);
         controlPanel.setPadding(10, 10, 10, 10);
 
         GradientDrawable panelBg = new GradientDrawable();
-        panelBg.setColor(Color.parseColor("#D9121216"));
+        panelBg.setColor(Color.parseColor("#26121216"));
         panelBg.setCornerRadius(20f);
-        panelBg.setStroke(2, Color.parseColor("#22FFFFFF"));
+        panelBg.setStroke(1, Color.parseColor("#33FFFFFF"));
         controlPanel.setBackground(panelBg);
 
         LinearLayout rowObj = new LinearLayout(this);
@@ -158,7 +272,6 @@ public class MainActivity extends Activity {
 					updateOverlayInfo();
 				}
 			});
-
 
         Button btnNextObj = createGlassButton("OBJ >", "#2A2A38", "#1E1E26");
         btnNextObj.setOnClickListener(new View.OnClickListener() {
@@ -178,14 +291,14 @@ public class MainActivity extends Activity {
 					r.currentTouchMode = (r.currentTouchMode + 1) % 3;
 
 					switch (r.currentTouchMode) {
-						case r.TOUCH_MODE_ROOM:
-							btnTouchModeSwitch.setText("TOUCH: ROOM");
+						case MyGLRenderer.TOUCH_MODE_ROOM:
+							btnTouchModeSwitch.setText("Touch: Room");
 							break;
-						case r.TOUCH_MODE_OBJ_ROT:
-							btnTouchModeSwitch.setText("TOUCH: OBJ ROT");
+						case MyGLRenderer.TOUCH_MODE_OBJ_ROT:
+							btnTouchModeSwitch.setText("Touch: Obj Rot");
 							break;
-						case r.TOUCH_MODE_OBJ_MOVE:
-							btnTouchModeSwitch.setText("TOUCH: OBJ MOVE");
+						case MyGLRenderer.TOUCH_MODE_OBJ_MOVE:
+							btnTouchModeSwitch.setText("Touch: Obj Move");
 							break;
 					}
 				}
@@ -238,11 +351,10 @@ public class MainActivity extends Activity {
 					updateOverlayInfo();
 				}
 			});
-			
-		Button btnResetView = createGlassButton("Reset View", "#D0392B", "#E34C3C");
-		
-		final MyGLRenderer renderer=glView.getRenderer();
-		btnResetView.setOnClickListener(new View.OnClickListener() {
+
+        Button btnResetView = createGlassButton("Reset View", "#D0392B", "#E34C3C");
+        final MyGLRenderer renderer = glView.getRenderer();
+        btnResetView.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (renderer != null) {
@@ -254,14 +366,63 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        rowObj.addView(btnPrevObj, new LinearLayout.LayoutParams(0, -2, 0.7f));
-		rowObj.addView(btnResetView);
-        rowObj.addView(btnNextObj, new LinearLayout.LayoutParams(0, -2, 0.7f));
-        rowObj.addView(btnTouchModeSwitch, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowObj.addView(btnViewMode, new LinearLayout.LayoutParams(0, -2, 0.8f));
-        rowObj.addView(btnTexActive, new LinearLayout.LayoutParams(0, -2, 0.8f));
-        rowObj.addView(btnDelObj, new LinearLayout.LayoutParams(0, -2, 0.7f));
-        rowObj.addView(btnToggleMode, new LinearLayout.LayoutParams(0, -2, 0.9f));
+        Button btnRemoveVertex = createGlassButton("Remove Vertex", "#FF8008", "#FFC837");
+        btnRemoveVertex.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					if (renderer != null && renderer.isEditMode) {
+						EditorObject active = renderer.getActiveObject();
+						if (active != null) {
+							active.history.saveState(active.mesh, active.selectedVertexIndex);
+							active.selectedVertexIndex = active.history.removeVertexWithHistory(active.mesh, active.selectedVertexIndex);
+							glView.requestRender();
+							updateOverlayInfo();
+						}
+					}
+				}
+			});
+
+        Button btnUndoVertex = createGlassButton("Undo Vertex", "#FF8008", "#FFC837");
+        btnUndoVertex.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					if (renderer != null && renderer.isEditMode) {
+						EditorObject active = renderer.getActiveObject();
+						if (active != null) {
+							active.selectedVertexIndex = active.history.undo(active.mesh, active.selectedVertexIndex);
+							glView.requestRender();
+							updateOverlayInfo();
+						}
+					}
+				}
+			});
+
+        Button btnRedoVertex = createGlassButton("Redo Vertex", "#FF8008", "#FFC837");
+        btnRedoVertex.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					if (renderer != null && renderer.isEditMode) {
+						EditorObject active = renderer.getActiveObject();
+						if (active != null) {
+							active.selectedVertexIndex = active.history.redo(active.mesh, active.selectedVertexIndex);
+							glView.requestRender();
+							updateOverlayInfo();
+						}
+					}
+				}
+			});
+
+        rowObj.addView(btnPrevObj);
+        rowObj.addView(btnNextObj);
+        rowObj.addView(btnResetView);
+        rowObj.addView(btnRemoveVertex);
+        rowObj.addView(btnUndoVertex);
+        rowObj.addView(btnRedoVertex);
+        rowObj.addView(btnTouchModeSwitch);
+        rowObj.addView(btnViewMode);
+        rowObj.addView(btnTexActive);
+        rowObj.addView(btnDelObj);
+        rowObj.addView(btnToggleMode);
 
         editControlsLayout = new LinearLayout(this);
         editControlsLayout.setOrientation(LinearLayout.VERTICAL);
@@ -305,20 +466,9 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        Button btnExtrudeV = createGlassButton("+ Extrude", "#FF8008", "#FFC837");
-        btnExtrudeV.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					glView.getRenderer().extrudeActiveVertex(0.0f, 0.4f, 0.0f);
-					glView.requestRender();
-					updateOverlayInfo();
-				}
-			});
-
-        rowVert.addView(btnPrevV, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowVert.addView(btnNextV, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowVert.addView(btnAddV, new LinearLayout.LayoutParams(0, -2, 1.2f));
-        rowVert.addView(btnExtrudeV, new LinearLayout.LayoutParams(0, -2, 1.4f));
+        rowVert.addView(btnPrevV);
+        rowVert.addView(btnNextV);
+        rowVert.addView(btnAddV);
 
         LinearLayout rowDpad = new LinearLayout(this);
         rowDpad.setOrientation(LinearLayout.HORIZONTAL);
@@ -349,58 +499,116 @@ public class MainActivity extends Activity {
 				@Override public void onClick(View v) { glView.getRenderer().moveSelectedVertex(0f, 0f, 0.1f); glView.requestRender(); updateOverlayInfo(); }
 			});
 
-        rowDpad.addView(btnSubX, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowDpad.addView(btnAddX, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowDpad.addView(btnSubY, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowDpad.addView(btnAddY, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowDpad.addView(btnSubZ, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        rowDpad.addView(btnAddZ, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        rowDpad.addView(btnSubX);
+        rowDpad.addView(btnAddX);
+        rowDpad.addView(btnSubY);
+        rowDpad.addView(btnAddY);
+        rowDpad.addView(btnSubZ);
+        rowDpad.addView(btnAddZ);
 
-        editControlsLayout.addView(rowVert);
-        editControlsLayout.addView(rowDpad);
+        editControlsLayout.addView(wrapInHorizontalScroll(rowVert));
+        editControlsLayout.addView(wrapInHorizontalScroll(rowDpad));
 
-        controlPanel.addView(rowObj);
+        controlPanel.addView(wrapInHorizontalScroll(rowObj));
         controlPanel.addView(editControlsLayout);
 
-        mainLayout.addView(viewportContainer, viewportParams);
-        mainLayout.addView(controlPanel);
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        panelParams.gravity = Gravity.BOTTOM;
+        panelParams.setMargins(12, 0, 12, 12);
+        viewportContainer.addView(controlPanel, panelParams);
 
-        setContentView(mainLayout);
+        setContentView(viewportContainer);
         checkStoragePermission();
         updateOverlayInfo();
     }
-	
-	@Override
-	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-		if (requestCode == REQUEST_PERMISSION_STORAGE) {
-			if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-				Toast.makeText(this, "Izin penyimpanan diberikan! Silakan ulangi export.", Toast.LENGTH_SHORT).show();
-			} else {
-				Toast.makeText(this, "Izin penyimpanan ditolak. File tidak dapat disimpan.", Toast.LENGTH_LONG).show();
-			}
-		}
-	}
-	
+
+    private void enableFullscreen() {
+        if (getActionBar() != null) {
+            getActionBar().hide();
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+            );
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_PERMISSION_STORAGE) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Izin penyimpanan diberikan! Silakan ulangi export.", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Izin penyimpanan ditolak. File tidak dapat disimpan.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private HorizontalScrollView wrapInHorizontalScroll(LinearLayout row) {
+        HorizontalScrollView scrollView = new HorizontalScrollView(this);
+        scrollView.setHorizontalScrollBarEnabled(false);
+        scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scrollView.setFillViewport(true);
+        scrollView.addView(row, new FrameLayout.LayoutParams(
+							   FrameLayout.LayoutParams.WRAP_CONTENT,
+							   FrameLayout.LayoutParams.WRAP_CONTENT
+						   ));
+        return scrollView;
+    }
+
+    private int applyAlpha(String hexColor, int alphaByte) {
+        int baseColor = Color.parseColor(hexColor);
+        return (baseColor & 0x00FFFFFF) | (alphaByte << 24);
+    }
 
     private Button createGlassButton(String text, String startHex, String endHex) {
         Button btn = new Button(this);
         btn.setText(text);
         btn.setTextColor(Color.WHITE);
-        btn.setTextSize(9.0f);
-        btn.setPadding(4, 6, 4, 6);
+        btn.setTextSize(10.5f);
+        btn.setSingleLine(true);
+        btn.setAllCaps(false);
+        btn.setGravity(Gravity.CENTER);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btn.setBackgroundTintList(null);
+            btn.setStateListAnimator(null);
+        }
+
+        float density = getResources().getDisplayMetrics().density;
+        btn.setMinWidth((int) (54 * density));
+        btn.setMinimumWidth((int) (54 * density));
+        btn.setPadding((int) (10 * density), 0, (int) (10 * density), 0);
 
         GradientDrawable btnBg = new GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
-            new int[]{Color.parseColor(startHex), Color.parseColor(endHex)}
+            new int[]{applyAlpha(startHex, 0x4D), applyAlpha(endHex, 0x4D)}
         );
-        btnBg.setCornerRadius(14f);
-        btnBg.setStroke(1, Color.parseColor("#33FFFFFF"));
+        btnBg.setCornerRadius(12f);
+        btnBg.setStroke(1, Color.parseColor("#55FFFFFF"));
         btn.setBackground(btnBg);
 
+        int btnHeight = (int) (36 * density);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
-        params.setMargins(2, 2, 2, 2);
+            LinearLayout.LayoutParams.WRAP_CONTENT, btnHeight);
+        params.setMargins(3, 3, 3, 3);
         btn.setLayoutParams(params);
         return btn;
     }
@@ -411,121 +619,129 @@ public class MainActivity extends Activity {
             btnToggleMode.setText("EDIT");
             GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.parseColor("#0072FF"), Color.parseColor("#00C6FF")}
+                new int[]{applyAlpha("#0072FF", 0x4D), applyAlpha("#00C6FF", 0x4D)}
             );
-            btnBg.setCornerRadius(14f);
+            btnBg.setCornerRadius(12f);
+            btnBg.setStroke(1, Color.parseColor("#55FFFFFF"));
             btnToggleMode.setBackground(btnBg);
         } else {
             editControlsLayout.setVisibility(View.GONE);
             btnToggleMode.setText("VIEW");
             GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{Color.parseColor("#444450"), Color.parseColor("#2C2C35")}
+                new int[]{applyAlpha("#444450", 0x4D), applyAlpha("#2C2C35", 0x4D)}
             );
-            btnBg.setCornerRadius(14f);
+            btnBg.setCornerRadius(12f);
+            btnBg.setStroke(1, Color.parseColor("#55FFFFFF"));
             btnToggleMode.setBackground(btnBg);
         }
     }
 
     private FrameLayout createScrollableFloatingSubMenu() {
-		FrameLayout container = new FrameLayout(this);
-		int maxHeight = (int) (320 * getResources().getDisplayMetrics().density);
+        FrameLayout container = new FrameLayout(this);
+        int maxHeight = (int) (320 * getResources().getDisplayMetrics().density);
 
-		ScrollView scrollView = new ScrollView(this);
-		scrollView.setVerticalScrollBarEnabled(false);
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setVerticalScrollBarEnabled(false);
 
-		LinearLayout panel = new LinearLayout(this);
-		panel.setOrientation(LinearLayout.VERTICAL);
-		panel.setPadding(16, 16, 16, 16);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(16, 16, 16, 16);
 
-		GradientDrawable glassBg = new GradientDrawable();
-		glassBg.setColor(Color.parseColor("#E618181F"));
-		glassBg.setCornerRadius(24f);
-		glassBg.setStroke(2, Color.parseColor("#33FFFFFF"));
-		panel.setBackground(glassBg);
+        GradientDrawable glassBg = new GradientDrawable();
+        glassBg.setColor(Color.parseColor("#4418181F"));
+        glassBg.setCornerRadius(24f);
+        glassBg.setStroke(2, Color.parseColor("#44FFFFFF"));
+        panel.setBackground(glassBg);
 
-		// 1. Tombol Tambah Cube
-		Button btnAddCube = createMenuButton("+ Add Cube", "#8E44AD");
-		btnAddCube.setOnClickListener(new View.OnClickListener() {
+        // 1. Tombol Open MTL
+        Button btnAddCube = createMenuButton("Open Mtl File", "#8E44AD");
+        btnAddCube.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
-					showAddObjectDialog();
+					openMtlFilePicker();
 				}
 			});
 
-		// 2. Tombol Open Model
-		Button btnLoadModel = createMenuButton("Open Model File", "#2980B9");
-		btnLoadModel.setOnClickListener(new View.OnClickListener() {
+        // 2. Tombol Open Model
+        Button btnLoadModel = createMenuButton("Open Model File", "#2980B9");
+        btnLoadModel.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (checkStoragePermission()) openModelPicker();
 				}
 			});
 
-		// 3. Tombol Open Texture 
-		Button btnLoadTex = createMenuButton("Open Texture BMP", "#16A085");
-		btnLoadTex.setOnClickListener(new View.OnClickListener() {
+        // 3. Tombol Open Texture
+        Button btnLoadTex = createMenuButton("Open Texture BMP", "#16A085");
+        btnLoadTex.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (checkStoragePermission()) openTexturePicker();
 				}
 			});
 
-		// 4. Tombol Export .3D
-		Button btnExport3D = createMenuButton("Export Model (.3D)", "#D35400");
-		btnExport3D.setOnClickListener(new View.OnClickListener() {
+        // 4. Tombol Export .3D
+        Button btnExport3D = createMenuButton("Export Model (.3D)", "#D35400");
+        btnExport3D.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (checkStoragePermission()) showSaveFileNameDialog(".3d");
 				}
 			});
 
-		// 5. Tombol Export .MDL 
-		Button btnExportMDL = createMenuButton("Export Model (.MDL)", "#C0392B");
-		btnExportMDL.setOnClickListener(new View.OnClickListener() {
+        // 5. Tombol Export .MDL
+        Button btnExportMDL = createMenuButton("Export Model (.MDL)", "#C0392B");
+        btnExportMDL.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (checkStoragePermission()) showSaveFileNameDialog(".mdl");
 				}
 			});
 
-		// 6. Tombol Export .OBJ
-		Button btnExportOBJ = createMenuButton("Export Wavefront (.OBJ)", "#7F8C8D");
-		btnExportOBJ.setOnClickListener(new View.OnClickListener() {
+        // 6. Tombol Export .OBJ
+        Button btnExportOBJ = createMenuButton("Export Wavefront (.OBJ)", "#7F8C8D");
+        btnExportOBJ.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					if (checkStoragePermission()) showSaveFileNameDialog(".obj");
 				}
 			});
 
-		
-		panel.addView(btnAddCube);
-		panel.addView(btnLoadModel);
-		panel.addView(btnLoadTex);
-		panel.addView(btnExport3D);
-		panel.addView(btnExportMDL);
-		panel.addView(btnExportOBJ);
+        panel.addView(btnAddCube);
+        panel.addView(btnLoadModel);
+        panel.addView(btnLoadTex);
+        panel.addView(btnExport3D);
+        panel.addView(btnExportMDL);
+        panel.addView(btnExportOBJ);
 
-		scrollView.addView(panel);
-		container.addView(scrollView, new FrameLayout.LayoutParams(
+        scrollView.addView(panel);
+        container.addView(scrollView, new FrameLayout.LayoutParams(
 							  FrameLayout.LayoutParams.WRAP_CONTENT, maxHeight));
 
-		return container;
-	}
-	
+        return container;
+    }
 
     private Button createMenuButton(String text, String hexAccentColor) {
         Button btn = new Button(this);
         btn.setText(text);
         btn.setTextColor(Color.WHITE);
         btn.setTextSize(10.5f);
+        btn.setAllCaps(false);
+        btn.setGravity(Gravity.CENTER);
         btn.setPadding(18, 10, 18, 10);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btn.setBackgroundTintList(null);
+            btn.setStateListAnimator(null);
+        }
 
         GradientDrawable btnBg = new GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
-            new int[]{Color.parseColor("#252530"), Color.parseColor(hexAccentColor)}
+            new int[]{applyAlpha("#252530", 0x55), applyAlpha(hexAccentColor, 0x55)}
         );
         btnBg.setCornerRadius(14f);
+        btnBg.setStroke(1, Color.parseColor("#44FFFFFF"));
         btn.setBackground(btnBg);
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -545,7 +761,7 @@ public class MainActivity extends Activity {
 
             TranslateAnimation slideUp = new TranslateAnimation(0, 0, 30, 0);
             AlphaAnimation fadeIn = new AlphaAnimation(0.0f, 1.0f);
-            ScaleAnimation scaleUp = new ScaleAnimation(0.85f, 1.0f, 0.85f, 1.0f, 
+            ScaleAnimation scaleUp = new ScaleAnimation(0.85f, 1.0f, 0.85f, 1.0f,
 														Animation.RELATIVE_TO_SELF, 1.0f, Animation.RELATIVE_TO_SELF, 1.0f);
 
             animSet.addAnimation(slideUp);
@@ -578,88 +794,85 @@ public class MainActivity extends Activity {
         }
         isMenuExpanded = !isMenuExpanded;
     }
-	private String getCleanFileName(String inputPath) {
-		if (inputPath == null) return "Unknown";
-		
-		try {
-			inputPath = java.net.URLDecoder.decode(inputPath, "UTF-8");
-		} catch (Exception ignored) {}
 
-		
-		if (inputPath.contains("/")) {
-			inputPath = inputPath.substring(inputPath.lastIndexOf("/") + 1);
-		}
-		
-		if (inputPath.contains("?")) {
-			inputPath = inputPath.substring(0, inputPath.indexOf("?"));
-		}
-		return inputPath;
-	}
-	
+    private String getCleanFileName(String inputPath) {
+        if (inputPath == null) return "Unknown";
+
+        try {
+            inputPath = java.net.URLDecoder.decode(inputPath, "UTF-8");
+        } catch (Exception ignored) {}
+
+        if (inputPath.contains("/")) {
+            inputPath = inputPath.substring(inputPath.lastIndexOf("/") + 1);
+        }
+
+        if (inputPath.contains("?")) {
+            inputPath = inputPath.substring(0, inputPath.indexOf("?"));
+        }
+        return inputPath;
+    }
 
     public void updateOverlayInfo() {
-		if (glView == null || glView.getRenderer() == null) return;
-		MyGLRenderer r = glView.getRenderer();
-		EditorObject activeObj = r.getActiveObject();
-		if (activeObj == null) return;
+        if (glView == null || glView.getRenderer() == null) return;
+        MyGLRenderer r = glView.getRenderer();
+        EditorObject activeObj = r.getActiveObject();
+        if (activeObj == null) return;
 
-		updateEditControlsVisibility(r.isEditMode);
+        updateEditControlsVisibility(r.isEditMode);
 
-		MeshModel mesh = activeObj.mesh;
-		int totalVerts = mesh.vertices.size();
-		int totalUVs = mesh.texCoords.size();
-		int totalNormals = mesh.normals.size();
-		int totalFaces = mesh.triangles.size();
-		String modeStr = r.isEditMode ? "EDIT" : "VIEW";
+        MeshModel mesh = activeObj.mesh;
+        int totalVerts = mesh.vertices.size();
+        int totalUVs = mesh.texCoords.size();
+        int totalNormals = mesh.normals.size();
+        int totalFaces = mesh.triangles.size();
+        String modeStr = r.isEditMode ? "EDIT" : "VIEW";
 
-		String cleanName = getCleanFileName(activeObj.name);
+        String cleanName = getCleanFileName(activeObj.name);
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("❖ miniBlender v1.0 [").append(modeStr).append("]\n");
-		sb.append("Obj: ").append(cleanName).append("\n");
+        StringBuilder sb = new StringBuilder();
+        sb.append("❖ miniBlender v1.0 [").append(modeStr).append("]\n");
+        sb.append("Obj: ").append(cleanName).append("\n");
 
-		sb.append("v: ").append(totalVerts)
-			.append(" | vt: ").append(totalUVs)
-			.append(" | vn: ").append(totalNormals)
-			.append(" | f: ").append(totalFaces);
-		sb.append("\nTexID: ").append(activeObj.textureId);
+        sb.append("v: ").append(totalVerts)
+            .append(" | vt: ").append(totalUVs)
+            .append(" | vn: ").append(totalNormals)
+            .append(" | f: ").append(totalFaces);
+        sb.append("\nTexID: ").append(activeObj.textureId);
         if (activeObj.texturePath != null && !activeObj.texturePath.isEmpty()) {
             sb.append(" | File: ").append(getCleanFileName(activeObj.texturePath));
         } else {
             sb.append(" | File: [BELUM DIPILIH]");
         }
 
-		if (r.isEditMode && totalVerts > 0 && activeObj.selectedVertexIndex >= 0 && activeObj.selectedVertexIndex < totalVerts) {
-			float[] v = mesh.vertices.get(activeObj.selectedVertexIndex);
-			sb.append(String.format("\nActive V[%d]: X:%.2f Y:%.2f Z:%.2f", activeObj.selectedVertexIndex, v[0], v[1], v[2]));
-		}
-		if (activeObj != null) {
-			String infoText = "\nObj: " + activeObj.name +
-				"\nV: " + activeObj.mesh.vertices.size() + " | F: " + activeObj.mesh.triangles.size() +
-				"\nPath: " + (activeObj.modelPath.isEmpty() ? "-" : activeObj.modelPath) +
-				"\nStatus: " + activeObj.mtlStatus;
-			sb.append(infoText);
-		}
+        if (r.isEditMode && totalVerts > 0 && activeObj.selectedVertexIndex >= 0 && activeObj.selectedVertexIndex < totalVerts) {
+            float[] v = mesh.vertices.get(activeObj.selectedVertexIndex);
+            sb.append(String.format("\nActive V[%d]: X:%.2f Y:%.2f Z:%.2f", activeObj.selectedVertexIndex, v[0], v[1], v[2]));
+        }
+        if (activeObj != null) {
+            String infoText = "\nObj: " + activeObj.name +
+                "\nV: " + activeObj.mesh.vertices.size() + " | F: " + activeObj.mesh.triangles.size() +
+                "\nPath: " + (activeObj.modelPath.isEmpty() ? "-" : activeObj.modelPath) +
+                "\nStatus: " + activeObj.mtlStatus;
+            sb.append(infoText);
+        }
 
-		tvOverlayInfo.setText(sb.toString());
-	}
-	
+        tvOverlayInfo.setText(sb.toString());
+    }
 
     private void showSaveFileNameDialog(final String extension) {
-		AlertDialog.Builder builder = new AlertDialog.Builder(this);
-		builder.setTitle("Simpan Objek Aktif (" + extension + ")");
-		final EditText input = new EditText(this);
-		EditorObject active = glView.getRenderer().getActiveObject();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Simpan Objek Aktif (" + extension + ")");
+        final EditText input = new EditText(this);
+        EditorObject active = glView.getRenderer().getActiveObject();
 
-	
-		String defaultName = (active != null) ? getCleanFileName(active.name) : "model";
-		if (defaultName.contains(".")) {
-			defaultName = defaultName.substring(0, defaultName.lastIndexOf("."));
-		}
-		input.setText(defaultName + extension);
-		builder.setView(input);
+        String defaultName = (active != null) ? getCleanFileName(active.name) : "model";
+        if (defaultName.contains(".")) {
+            defaultName = defaultName.substring(0, defaultName.lastIndexOf("."));
+        }
+        input.setText(defaultName + extension);
+        builder.setView(input);
 
-		builder.setPositiveButton("Pilih Folder & Simpan", new DialogInterface.OnClickListener() {
+        builder.setPositiveButton("Pilih Folder & Simpan", new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface dialog, int which) {
 					String fileName = input.getText().toString().trim();
@@ -667,11 +880,9 @@ public class MainActivity extends Activity {
 					if (!fileName.endsWith(extension)) fileName = fileName + extension;
 					pendingExportFormat = extension;
 
-			
 					Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
 					intent.addCategory(Intent.CATEGORY_OPENABLE);
 
-			
 					if (extension.equals(".mdl")) {
 						intent.setType("application/octet-stream");
 					} else {
@@ -679,14 +890,12 @@ public class MainActivity extends Activity {
 					}
 
 					intent.putExtra(Intent.EXTRA_TITLE, fileName);
-					startActivityForResult(intent, 103); 
+					startActivityForResult(intent, 103);
 				}
 			});
-		builder.setNegativeButton("Batal", null);
-		builder.show();
-	}
-	
-	
+        builder.setNegativeButton("Batal", null);
+        builder.show();
+    }
 
     private void showAddObjectDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -749,36 +958,36 @@ public class MainActivity extends Activity {
     }
 
     private boolean checkStoragePermission() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-			if (!android.os.Environment.isExternalStorageManager()) {
-				try {
-					android.content.Intent intent = new android.content.Intent(
-						android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
-					);
-					intent.setData(android.net.Uri.parse("package:" + getPackageName()));
-					startActivity(intent);
-				} catch (Exception e) {
-					android.content.Intent intent = new android.content.Intent(
-						android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
-					);
-					startActivity(intent);
-				}
-			}
-		} else {
-			if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) 
-				!= android.content.pm.PackageManager.PERMISSION_GRANTED) {
-				requestPermissions(new String[]{
-									   android.Manifest.permission.READ_EXTERNAL_STORAGE,
-									   android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                try {
+                    Intent intent = new Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+                    );
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Intent intent = new Intent(
+                        android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                    );
+                    startActivity(intent);
+                }
+            }
+        } else {
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{
+									   Manifest.permission.READ_EXTERNAL_STORAGE,
+									   Manifest.permission.WRITE_EXTERNAL_STORAGE
 								   }, 101);
-				return false;
-			}
-		}
+                return false;
+            }
+        }
         return true;
     }
 
     private void openTexturePicker() {
-        toggleFloatingMenu(); 
+        toggleFloatingMenu();
         isInitialLaunch = false;
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("image/*");
@@ -786,110 +995,121 @@ public class MainActivity extends Activity {
     }
 
     private void openModelPicker() {
-        toggleFloatingMenu(); 
+        toggleFloatingMenu();
         isInitialLaunch = false;
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("*/*");
         startActivityForResult(Intent.createChooser(intent, "Buka File Model (.3d/.obj/.mdl)"), REQUEST_PICK_MODEL);
     }
-	private Bitmap decodeBitmapSafe(Uri uri) {
-		try {
-			// 1. Coba decoder bawaan Android dulu
-			InputStream is = getContentResolver().openInputStream(uri);
-			BitmapFactory.Options options = new BitmapFactory.Options();
-			options.inScaled = false;
-			options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-			Bitmap bmp = BitmapFactory.decodeStream(is, null, options);
-			if (is != null) is.close();
-			if (bmp != null) return bmp;
 
-			// 2. Jika null (misal BMP 8-bit palette / header non-standar), baca manual byte BMP
-			InputStream rawIs = getContentResolver().openInputStream(uri);
-			if (rawIs == null) return null;
-			java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-			byte[] buf = new byte[4096];
-			int n;
-			while ((n = rawIs.read(buf)) != -1) baos.write(buf, 0, n);
-			rawIs.close();
-			byte[] data = baos.toByteArray();
+    public void openMtlFilePicker() {
+        EditorObject active = glView.getRenderer().getActiveObject();
+        if (active == null) {
+            Toast.makeText(this, "Tidak ada objek aktif!", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-			if (data.length > 54 && data[0] == 'B' && data[1] == 'M') {
-				int dataOffset = (data[10] & 0xFF) | ((data[11] & 0xFF) << 8) | ((data[12] & 0xFF) << 16) | ((data[13] & 0xFF) << 24);
-				int width = (data[18] & 0xFF) | ((data[19] & 0xFF) << 8) | ((data[20] & 0xFF) << 16) | ((data[21] & 0xFF) << 24);
-				int height = (data[22] & 0xFF) | ((data[23] & 0xFF) << 8) | ((data[24] & 0xFF) << 16) | ((data[25] & 0xFF) << 24);
-				int bpp = (data[28] & 0xFF) | ((data[29] & 0xFF) << 8);
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_PICK_MTL);
+    }
 
-				boolean topDown = height < 0;
-				int absH = Math.abs(height);
-				int[] pixels = new int[width * absH];
+    private Bitmap decodeBitmapSafe(Uri uri) {
+        try {
+            // 1. Coba decoder bawaan Android dulu
+            InputStream is = getContentResolver().openInputStream(uri);
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inScaled = false;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap bmp = BitmapFactory.decodeStream(is, null, options);
+            if (is != null) is.close();
+            if (bmp != null) return bmp;
 
-				if (bpp == 24) {
-					int rowSize = ((width * 3 + 3) / 4) * 4;
-					for (int y = 0; y < absH; y++) {
-						int srcY = topDown ? y : (absH - 1 - y);
-						int rowStart = dataOffset + srcY * rowSize;
-						for (int x = 0; x < width; x++) {
-							int idx = rowStart + x * 3;
-							if (idx + 2 < data.length) {
-								int b = data[idx] & 0xFF;
-								int g = data[idx + 1] & 0xFF;
-								int r = data[idx + 2] & 0xFF;
-								pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
-							}
-						}
-					}
-					return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
-				} else if (bpp == 8) {
-					int headerSize = (data[14] & 0xFF) | ((data[15] & 0xFF) << 8) | ((data[16] & 0xFF) << 16) | ((data[17] & 0xFF) << 24);
-					int paletteOffset = 14 + headerSize;
-					int[] palette = new int[256];
-					for (int i = 0; i < 256; i++) {
-						int pIdx = paletteOffset + i * 4;
-						if (pIdx + 2 < data.length) {
-							int b = data[pIdx] & 0xFF;
-							int g = data[pIdx + 1] & 0xFF;
-							int r = data[pIdx + 2] & 0xFF;
-							palette[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
-						}
-					}
-					int rowSize = ((width + 3) / 4) * 4;
-					for (int y = 0; y < absH; y++) {
-						int srcY = topDown ? y : (absH - 1 - y);
-						int rowStart = dataOffset + srcY * rowSize;
-						for (int x = 0; x < width; x++) {
-							int idx = rowStart + x;
-							if (idx < data.length) {
-								pixels[y * width + x] = palette[data[idx] & 0xFF];
-							}
-						}
-					}
-					return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
-				}
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		return null;
-	}
-	
+            // 2. Jika null (misal BMP 8-bit palette / header non-standar), baca manual byte BMP
+            InputStream rawIs = getContentResolver().openInputStream(uri);
+            if (rawIs == null) return null;
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = rawIs.read(buf)) != -1) baos.write(buf, 0, n);
+            rawIs.close();
+            byte[] data = baos.toByteArray();
+
+            if (data.length > 54 && data[0] == 'B' && data[1] == 'M') {
+                int dataOffset = (data[10] & 0xFF) | ((data[11] & 0xFF) << 8) | ((data[12] & 0xFF) << 16) | ((data[13] & 0xFF) << 24);
+                int width = (data[18] & 0xFF) | ((data[19] & 0xFF) << 8) | ((data[20] & 0xFF) << 16) | ((data[21] & 0xFF) << 24);
+                int height = (data[22] & 0xFF) | ((data[23] & 0xFF) << 8) | ((data[24] & 0xFF) << 16) | ((data[25] & 0xFF) << 24);
+                int bpp = (data[28] & 0xFF) | ((data[29] & 0xFF) << 8);
+
+                boolean topDown = height < 0;
+                int absH = Math.abs(height);
+                int[] pixels = new int[width * absH];
+
+                if (bpp == 24) {
+                    int rowSize = ((width * 3 + 3) / 4) * 4;
+                    for (int y = 0; y < absH; y++) {
+                        int srcY = topDown ? y : (absH - 1 - y);
+                        int rowStart = dataOffset + srcY * rowSize;
+                        for (int x = 0; x < width; x++) {
+                            int idx = rowStart + x * 3;
+                            if (idx + 2 < data.length) {
+                                int b = data[idx] & 0xFF;
+                                int g = data[idx + 1] & 0xFF;
+                                int r = data[idx + 2] & 0xFF;
+                                pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                            }
+                        }
+                    }
+                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+                } else if (bpp == 8) {
+                    int headerSize = (data[14] & 0xFF) | ((data[15] & 0xFF) << 8) | ((data[16] & 0xFF) << 16) | ((data[17] & 0xFF) << 24);
+                    int paletteOffset = 14 + headerSize;
+                    int[] palette = new int[256];
+                    for (int i = 0; i < 256; i++) {
+                        int pIdx = paletteOffset + i * 4;
+                        if (pIdx + 2 < data.length) {
+                            int b = data[pIdx] & 0xFF;
+                            int g = data[pIdx + 1] & 0xFF;
+                            int r = data[pIdx + 2] & 0xFF;
+                            palette[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                        }
+                    }
+                    int rowSize = ((width + 3) / 4) * 4;
+                    for (int y = 0; y < absH; y++) {
+                        int srcY = topDown ? y : (absH - 1 - y);
+                        int rowStart = dataOffset + srcY * rowSize;
+                        for (int x = 0; x < width; x++) {
+                            int idx = rowStart + x;
+                            if (idx < data.length) {
+                                pixels[y * width + x] = palette[data[idx] & 0xFF];
+                            }
+                        }
+                    }
+                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     @Override
-	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-		super.onActivityResult(requestCode, resultCode, data);
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
 
-		if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-			final Uri uri = data.getData();
+        if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+            final Uri uri = data.getData();
 
-			
-			if (requestCode == REQUEST_PICK_TEXTURE) {
-				try {
-					
-					InputStream inputStream = getContentResolver().openInputStream(uri);
-					
-					final Bitmap bitmap = decodeBitmapSafe(uri);
-					if (inputStream != null) inputStream.close();
+            if (requestCode == REQUEST_PICK_TEXTURE) {
+                try {
+                    InputStream inputStream = getContentResolver().openInputStream(uri);
+                    final Bitmap bitmap = decodeBitmapSafe(uri);
+                    if (inputStream != null) inputStream.close();
 
-					if (bitmap != null) {
-						glView.queueEvent(new Runnable() {
+                    if (bitmap != null) {
+                        glView.queueEvent(new Runnable() {
 								@Override
 								public void run() {
 									glView.getRenderer().loadTextureForActiveObject(bitmap, uri.toString());
@@ -905,16 +1125,14 @@ public class MainActivity extends Activity {
 										});
 								}
 							});
-					}
-				} catch (Exception e) {
-					Toast.makeText(this, "Error tekstur: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-				}
-			} 
-
-			else if (requestCode == REQUEST_PICK_MODEL) {
-				try {
-					final String path = uri.toString();
-					glView.queueEvent(new Runnable() {
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Error tekstur: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQUEST_PICK_MODEL) {
+                try {
+                    final String path = uri.toString();
+                    glView.queueEvent(new Runnable() {
 							@Override
 							public void run() {
 								try {
@@ -933,7 +1151,7 @@ public class MainActivity extends Activity {
 											// Cek Jalur A: Lewat File Path asli (misal /storage/emulated/0/.../aventador.mtl)
 											if (active.modelPath != null && !active.modelPath.isEmpty()) {
 												String mtlRealPath = active.modelPath.replaceAll("(?i)\\.obj$", ".mtl");
-												java.io.File mtlFile = new java.io.File(mtlRealPath);
+												File mtlFile = new File(mtlRealPath);
 												if (mtlFile.exists() && mtlFile.canRead()) {
 													mtlStream = new java.io.FileInputStream(mtlFile);
 												}
@@ -978,22 +1196,22 @@ public class MainActivity extends Activity {
 								}
 							}
 						});
-				} catch (Exception e) {
-					Toast.makeText(this, "Error akses file model: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-				}
-			}
-		}
-	}
+                } catch (Exception e) {
+                    Toast.makeText(this, "Error akses file model: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            }
+        }
+    }
 
     @Override
     protected void onPause() {
         super.onPause();
-		glView.onPause();
-		
+        glView.onPause();
+
         if (glView != null) {
-		
-			glView.getRenderer().saveAllObjectsToCache(this, glView.getRenderer().activeObjectIndex);
-		}
+            glView.getRenderer().saveAllObjectsToCache(this, glView.getRenderer().activeObjectIndex);
+        }
+        enableFullscreen();
     }
 
     @Override
@@ -1016,6 +1234,14 @@ public class MainActivity extends Activity {
 							});
 					}
 				});
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            enableFullscreen();
         }
     }
 }

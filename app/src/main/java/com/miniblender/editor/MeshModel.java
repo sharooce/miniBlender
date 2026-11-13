@@ -107,9 +107,9 @@ public class MeshModel {
 	"  float diff = max(dot(norm, lightDir), 0.0);\n" +
 	"  float intensity = 0.75 + (0.25 * diff);\n" +
 	"  \n" +
-	"  if (uUseTexture == 1) {\n" +
-	"    vec4 texColor = texture2D(uTexture, vTexCoord);\n" +
-	"    vec3 baseRgb = (uHasVertexColor == 1) ? (texColor.rgb * vVertexColor) : texColor.rgb;\n" +
+	"  if (uUseTexture == 1) {"+
+	"    vec4 texColor = texture2D(uTexture, vTexCoord);"+
+	"    vec3 baseRgb = (uHasVertexColor == 1) ? (texColor.rgb * vVertexColor) : texColor.rgb; "+
 	"    gl_FragColor = vec4(baseRgb * intensity, texColor.a);\n" +
 	"  } else if (uHasVertexColor == 1) {\n" +
 	"    gl_FragColor = vec4(vVertexColor * intensity, 1.0);\n" +
@@ -261,6 +261,20 @@ public class MeshModel {
             }
         }
     }
+	public void rebuildBuffers() {
+        if (triangles.isEmpty()) {
+            vertexBuffer = null;
+            uvBuffer = null;
+            normalBuffer = null;
+            colorBuffer = null;
+            lineBuffer = null;
+            lineVertexCount = 0;
+            return;
+        }
+        updateBuffers();
+    }
+	
+	
 
     public void updateBuffers() {
         if (triangles.isEmpty()) return;
@@ -517,6 +531,8 @@ public class MeshModel {
             pureName = f.getName();
         }
         importFromFile(inputStream, pureName, parentPath);
+		
+		
     }
 
     public void importFromFile(InputStream inputStream, String fileName, String parentDir) throws Exception {

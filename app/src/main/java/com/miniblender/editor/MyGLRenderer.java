@@ -39,6 +39,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     public float posX = 0.0f;
     public float posY = 0.0f;
     public float scaleFactor = 1.0f;
+	public int screenWidth = 1;
+	public int screeHeight =1;
 
     public boolean isEditMode = true;
     public boolean isSingleViewMode = false; // false = View All, true = View Single
@@ -48,7 +50,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 
     private final float[] projectionMatrix = new float[16];
     private final float[] viewMatrix = new float[16];
-    private final float[] modelMatrix = new float[16];
+    //private final float[] modelMatrix = new float[16];
     private final float[] mvpMatrix = new float[16];
 
     public MyGLRenderer(Context context) {
@@ -84,10 +86,10 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 		mesh.updateBuffers();    
     }
 	public void resetRoomTransform() {
-		// Reset sudut pandang kamera/ruangan ke posisi default (0, 0)
+		
 		this.rotX = 0.0f;
 		this.rotY = 0.0f;
-		this.scaleFactor = 1.0f; // Reset zoom kamera ke skala normal
+		this.scaleFactor = 1.0f;
 	}
 
     public List<EditorObject> getObjects() { return objects; }
@@ -178,6 +180,100 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             objects.add(newObj);
             activeObjectIndex = objects.size() - 1;
         }
+		active.updateBoundingRadius();
+    }
+	
+	public void screenToWorldRay(float touchX, float touchY, float[] outOrigin, float[] outDir) {
+        float x = (2.0f * touchX) / screenWidth - 1.0f;
+        float y = 1.0f - (2.0f * touchY) / screeHeight;
+
+        float[] invVP = new float[16];
+        float[] vp = new float[16];
+        android.opengl.Matrix.multiplyMM(vp, 0, projectionMatrix, 0, viewMatrix, 0);
+        android.opengl.Matrix.invertM(invVP, 0, vp, 0);
+
+        float[] nearPoint = new float[]{x, y, -1.0f, 1.0f};
+        float[] farPoint  = new float[]{x, y,  1.0f, 1.0f};
+        float[] nearWorld = new float[4];
+        float[] farWorld  = new float[4];
+
+        android.opengl.Matrix.multiplyMV(nearWorld, 0, invVP, 0, nearPoint, 0);
+        android.opengl.Matrix.multiplyMV(farWorld,  0, invVP, 0, farPoint,  0);
+
+        for (int i = 0; i < 3; i++) {
+            nearWorld[i] /= nearWorld[3];
+            farWorld[i]  /= farWorld[3];
+            outOrigin[i] = nearWorld[i];
+            outDir[i]    = farWorld[i] - nearWorld[i];
+        }
+
+        // Normalisasi vektor arah ray
+        float len = (float) Math.sqrt(outDir[0]*outDir[0] + outDir[1]*outDir[1] + outDir[2]*outDir[2]);
+        if (len > 0.0001f) {
+            outDir[0] /= len;
+            outDir[1] /= len;
+            outDir[2] /= len;
+        }
+    }
+
+    // 2. Cek sentuhan pada semua objek (Kiri / Tengah / Kanan) & pilih yang terdekat
+    public int pickObjectAtTouch(float touchX, float touchY) {
+        if (objects == null || objects.isEmpty()) return -1;
+
+        float[] rayOrigin = new float[3];
+        float[] rayDir = new float[3];
+        screenToWorldRay(touchX, touchY, rayOrigin, rayDir);
+
+        int hitIndex = -1;
+        float closestDist = Float.MAX_VALUE;
+
+        for (int i = 0; i < objects.size(); i++) {
+            EditorObject obj = objects.get(i);
+            // Posisi pusat objek di dunia 3D (sesuaikan dengan nama variabel posisi di EditorObject kamu)
+            float cx = obj.offsetX;
+            float cy = obj.offsetY;
+            float cz = obj.offsetZ;
+            float radius = 1.2f * Math.max(obj.scaleX, Math.max(obj.scaleY, obj.scaleZ));
+
+            // Hitung jarak terdekat pusat objek ke garis Ray
+            float ocX = cx - rayOrigin[0];
+            float ocY = cy - rayOrigin[1];
+            float ocZ = cz - rayOrigin[2];
+
+            float tca = ocX * rayDir[0] + ocY * rayDir[1] + ocZ * rayDir[2];
+            if (tca < 0) continue; // Objek berada di belakang kamera
+
+            float d2 = (ocX * ocX + ocY * ocY + ocZ * ocZ) - (tca * tca);
+            if (d2 <= radius * radius && tca < closestDist) {
+                closestDist = tca;
+                hitIndex = i;
+            }
+        }
+        return hitIndex;
+    }
+
+    // 3. Geser objek aktif mengikuti gerakan jari sejajar pandangan kamera
+    public void dragActiveObjectOnScreen(float dxPixel, float dyPixel) {
+        EditorObject active = getActiveObject();
+        if (active == null) return;
+
+        // Ambil vektor Right & Up kamera dari mViewMatrix
+        float rightX = viewMatrix[0];
+        float rightY = viewMatrix[4];
+        float rightZ = viewMatrix[8];
+
+        float upX = viewMatrix[1];
+        float upY = viewMatrix[5];
+        float upZ = viewMatrix[9];
+
+        float sensitivity = 0.005f; // Sesuaikan dengan jarak zoom kamera
+        float moveX = (dxPixel * rightX - dyPixel * upX) * sensitivity;
+        float moveY = (dxPixel * rightY - dyPixel * upY) * sensitivity;
+        float moveZ = (dxPixel * rightZ - dyPixel * upZ) * sensitivity;
+
+        active.offsetX += moveX;
+        active.offsetY += moveY;
+        active.offsetZ += moveZ;
     }
 	
 	
@@ -240,7 +336,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 			SharedPreferences pref = context.getSharedPreferences("MiniBlenderPrefs", Context.MODE_PRIVATE);
             pref.edit().remove("cached_scene_json").apply();
 
-            File cacheFile = new File(context.getCacheDir(), "miniblender_scene_cache.json");
+            File cacheFile = new File(getAppStorageDir(), "miniblender_scene_cache.json");
             if (cacheFile.exists()) {
                 cacheFile.delete();
             }
@@ -340,6 +436,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(0.22f, 0.22f, 0.24f, 1.0f);
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);
+		
 
         for (EditorObject obj : objects) {
             obj.mesh.initShader();
@@ -353,8 +450,22 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     public void onSurfaceChanged(GL10 gl, int width, int height) {
         GLES20.glViewport(0, 0, width, height);
         float ratio = (float) width / height;
+		this.screenWidth = width;
+		this.screeHeight = height;
         android.opengl.Matrix.frustumM(projectionMatrix, 0, -ratio, ratio, -1, 1, 1.0f, 100.0f);
     }
+	private java.io.File getAppStorageDir() {
+        java.io.File dir = context.getExternalFilesDir(null);
+        if (dir == null) {
+            dir = context.getFilesDir();
+        }
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return dir;
+    }
+	
+	
 
     @Override
     public void onDrawFrame(GL10 gl) {
@@ -454,13 +565,14 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             
             android.opengl.Matrix.multiplyMM(tempMatrix, 0, viewMatrix, 0, scratchModelMatrix, 0);
             android.opengl.Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, tempMatrix, 0);
+			android.opengl.Matrix.scaleM(scratchModelMatrix, 0, obj.scaleX, obj.scaleY, obj.scaleZ);
+			
 			
             obj.mesh.draw(mvpMatrix, scratchModelMatrix, obj.textureId, obj.selectedVertexIndex, isEditMode && isThisObjectActive);
 			
         }
     }
 
-    // PASANG TEKSTUR HANYA KE OBJEK YANG SEDANG AKTIF
 	public void loadTextureForActiveObject(final Bitmap srcBitmap, final String texturePath) {
         EditorObject active = getActiveObject();
         if (active == null || srcBitmap == null || srcBitmap.isRecycled()) return;
@@ -484,13 +596,66 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         if (texturePath != null) {
             active.texturePath = texturePath;
         }
+		java.io.File cacheTexFile = new java.io.File(getAppStorageDir(), "tex_" + active.name.replaceAll("[^a-zA-Z0-9._-]", "_") + ".png");
+		try {
+            if (active.texturePath != null && active.texturePath.contains("tex_")) {
+                java.io.File oldTex = new java.io.File(active.texturePath);
+                if (oldTex.exists()) oldTex.delete();
+            }
+
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(cacheTexFile);
+            flippedBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+            fos.flush();
+            fos.close();
+
+            active.texturePath = cacheTexFile.getAbsolutePath();
+        } catch (Exception e) {
+            e.printStackTrace();
+            if (texturePath != null) {
+                active.texturePath = texturePath;
+            }
+        }
+
+        /*if (active.pendingTextureBitmap != null && !active.pendingTextureBitmap.isRecycled()) {
+            active.pendingTextureBitmap.recycle();
+        }
+        active.pendingTextureBitmap = flippedBitmap;
+		*/
+        saveSceneToCache();
+		
+		
+    }
+	public void clearAllOldCache() {
+        
+        android.content.SharedPreferences prefs = context.getSharedPreferences("MiniBlenderPrefs", android.content.Context.MODE_PRIVATE);
+        prefs.edit().clear().apply();
+
+        deleteDirContents(context.getCacheDir());
+        deleteDirContents(context.getFilesDir());
+
+        deleteDirContents(context.getExternalCacheDir());
+        deleteDirContents(getAppStorageDir());
+    }
+
+    private void deleteDirContents(java.io.File dir) {
+        if (dir != null && dir.exists() && dir.isDirectory()) {
+            java.io.File[] files = dir.listFiles();
+            if (files != null) {
+                for (java.io.File f : files) {
+                    if (f.isDirectory()) {
+                        deleteDirContents(f);
+                    }
+                    f.delete();
+                }
+            }
+        }
     }
 	
 	
 
     public void saveSceneToCache() {
         try {
-            File cacheFile = new File(context.getCacheDir(), "miniblender_scene_cache.json");
+            File cacheFile = new File(getAppStorageDir(), "miniblender_scene_cache.json");
             JSONObject root = new JSONObject();
             root.put("activeObjectIndex", activeObjectIndex);
             root.put("isEditMode", isEditMode);
@@ -506,12 +671,26 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             FileWriter writer = new FileWriter(cacheFile);
             writer.write(root.toString());
             writer.close();
+			android.content.SharedPreferences prefs = context.getSharedPreferences("MiniBlenderPrefs", android.content.Context.MODE_PRIVATE);
+			prefs.edit()
+				.putInt("schema_version", 2) 
+				.putString("scene_json_path", cacheFile.getAbsolutePath())
+				.putInt("active_index", activeObjectIndex)
+				.apply();
+			
         } catch (Exception ignored) {}
     }
 
-    public boolean restoreSceneFromCache() {
+	public boolean restoreSceneFromCache() {
         try {
-            File cacheFile = new File(context.getCacheDir(), "miniblender_scene_cache.json");
+            android.content.SharedPreferences prefs = context.getSharedPreferences("MiniBlenderPrefs", android.content.Context.MODE_PRIVATE);
+            int savedVersion = prefs.getInt("schema_version", 1);
+            if (savedVersion != 2) {
+                clearAllOldCache();
+                return false;
+            }
+
+            File cacheFile = new File(getAppStorageDir(), "miniblender_scene_cache.json");
             if (!cacheFile.exists()) return false;
 
             BufferedReader reader = new BufferedReader(new FileReader(cacheFile));
@@ -540,12 +719,13 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
                     obj.mesh.updateBuffers();
                 }
 
+                // Langsung pasang ke obj[i] masing-masing tanpa memanggil loadTextureForActiveObject!
                 if (!obj.texturePath.isEmpty()) {
                     File texFile = new File(obj.texturePath);
                     if (texFile.exists()) {
                         Bitmap bmp = BitmapFactory.decodeFile(texFile.getAbsolutePath());
                         if (bmp != null) {
-                            loadTextureForActiveObject(bmp, obj.texturePath);
+                            obj.pendingTextureBitmap = bmp;
                         }
                     }
                 }
@@ -556,5 +736,6 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             return false;
         }
     }
+	
 }
 

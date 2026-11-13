@@ -12,13 +12,20 @@ public class EditorObject {
     public float rotX = 0.0f;
     public float rotY = 0.0f;
     public float rotZ = 0.0f;
+	public float scaleX = 1.0f;
+    public float scaleY = 1.0f;
+    public float scaleZ = 1.0f;
     public int selectedVertexIndex = 0;
+	public float boundingRadius = 1.2f;
     public int textureId = 0;
     public String texturePath = ""; 
 	public float[] rotationMatrix = new float[16];
 	public String modelPath = "";
 	public String mtlStatus = "No MTL";
 	public transient android.graphics.Bitmap pendingTextureBitmap = null;
+	public transient MeshHistoryManager history = new MeshHistoryManager();
+	
+	
 	
 
     public EditorObject(String name) {
@@ -26,10 +33,24 @@ public class EditorObject {
         this.mesh = new MeshModel();
     }
 
-    // Constructor kosong untuk penciptaan dinamis saat load JSON
+   
     public EditorObject() {
         this.name = "Object";
         this.mesh = new MeshModel();
+    }
+	public void updateBoundingRadius() {
+        if (mesh == null || mesh.vertices == null || mesh.vertices.isEmpty()) {
+            boundingRadius = 1.0f;
+            return;
+        }
+        float maxDistSq = 0.25f; // Radius minimal 0.5f agar objek kecil tetap mudah disentuh
+        for (float[] v : mesh.vertices) {
+            float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+            if (d2 > maxDistSq) {
+                maxDistSq = d2;
+            }
+        }
+        boundingRadius = (float) Math.sqrt(maxDistSq);
     }
 	public void applyMTLFromStream(java.io.InputStream is, String mtlName) throws Exception {
 		if (is == null || mesh == null) return;
@@ -105,6 +126,11 @@ public class EditorObject {
         root.put("texturePath", texturePath);
 		root.put("modelPath", modelPath != null ? modelPath : "");
 		root.put("mtlStatus", mtlStatus != null ? mtlStatus : "No MTL");
+		root.put("boundingRadius", (double) this.boundingRadius);
+		root.put("scaleX", (double) this.scaleX);
+		root.put("scaleY", (double) this.scaleY);
+		root.put("scaleZ", (double) this.scaleZ);
+		
 		
 		root.put("hasMtlColors", mesh.hasMtlColors);
 
@@ -221,6 +247,12 @@ public class EditorObject {
 		this.modelPath = root.optString("modelPath", "");
 		this.mtlStatus = root.optString("mtlStatus", "No MTL");
 		mesh.hasMtlColors = root.optBoolean("hasMtlColors", false);
+		this.boundingRadius = (float) root.optDouble("boundingRadius", 1.2);
+		this.scaleX = (float) root.optDouble("scaleX", 1.0);
+	    this.scaleY = (float) root.optDouble("scaleY", 1.0);
+		this.scaleZ = (float) root.optDouble("scaleZ", 1.0);
+		
+		
 		mesh.faceColors.clear();
 		org.json.JSONArray fcArray = root.optJSONArray("faceColors");
 		if (fcArray != null) {
