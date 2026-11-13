@@ -47,17 +47,19 @@ public class MainActivity extends Activity {
     private MyGLSurfaceView glView;
     private TextView tvOverlayInfo;
 
-    private Button btnMainFab;
-    private FrameLayout floatingMenuContainer;
-    private LinearLayout editControlsLayout;
     private Button btnToggleMode;
     private Button btnTouchModeSwitch;
-    private boolean isMenuExpanded = false;
-    private String pendingExportFormat = ".3d";
-    private boolean isInitialLaunch = true;
-
+	private Button btnMainFab;
+	private LinearLayout editControlsLayout;
+	private LinearLayout fabGroupContainer;
+	private FrameLayout floatingMenuContainer;
+    private FrameLayout.LayoutParams groupParams;
     private LinearLayout controlPanel;
     private Button btnTogglePanel;
+	
+	private boolean isMenuExpanded = false;
+    private String pendingExportFormat = ".3d";
+    private boolean isInitialLaunch = true;
     private boolean isControlPanelVisible = true;
     private Button btnToggleInfo;
     private boolean isOverlayInfoVisible = true;
@@ -176,13 +178,14 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        // --- 2. Grup Submenu (Atas) + Tombol Hide Panel & FAB (Bawah) di Pojok Kanan Bawah ---
         int fabSize = (int) (52 * density);
         int miniFabSize = (int) (44 * density);
 
-        final LinearLayout fabGroupContainer = new LinearLayout(this);
+		final LinearLayout fabGroupContainer = new LinearLayout(this);
         fabGroupContainer.setOrientation(LinearLayout.VERTICAL);
         fabGroupContainer.setGravity(Gravity.END);
+        fabGroupContainer.setClipChildren(false);
+        fabGroupContainer.setClipToPadding(false);
 
         floatingMenuContainer = createScrollableFloatingSubMenu();
         floatingMenuContainer.setVisibility(View.GONE);
@@ -190,12 +193,64 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         );
+        subMenuParams.gravity = Gravity.END;
         subMenuParams.setMargins(0, 0, 0, (int) (10 * density));
         fabGroupContainer.addView(floatingMenuContainer, subMenuParams);
 
         LinearLayout fabRow = new LinearLayout(this);
         fabRow.setOrientation(LinearLayout.HORIZONTAL);
-        fabRow.setGravity(Gravity.CENTER_VERTICAL);
+        fabRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        LinearLayout.LayoutParams fabRowParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        fabRowParams.gravity = Gravity.END;
+		
+		
+		btnToggleMode = new Button(this);
+        btnToggleMode.setText("EDIT");
+        btnToggleMode.setTextSize(11f);
+        btnToggleMode.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        btnToggleMode.setTextColor(Color.WHITE);
+        btnToggleMode.setAllCaps(false);
+        btnToggleMode.setGravity(Gravity.CENTER);
+        btnToggleMode.setPadding((int) (14 * density), 0, (int) (14 * density), 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            btnToggleMode.setBackgroundTintList(null);
+            btnToggleMode.setStateListAnimator(null);
+        }
+
+        GradientDrawable modeBg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{applyAlpha("#0072FF", 0x66), applyAlpha("#00C6FF", 0x66)}
+        );
+        modeBg.setCornerRadius(miniFabSize / 2f); 
+		
+        modeBg.setStroke(2, Color.parseColor("#66FFFFFF"));
+        btnToggleMode.setBackground(modeBg);
+		btnToggleMode.setSingleLine(true);
+        btnToggleMode.setMinWidth((int) (64 * density));
+
+        LinearLayout.LayoutParams modeBtnParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, miniFabSize);
+        modeBtnParams.setMargins(0, 0, (int) (10 * density), 0);
+        fabRow.addView(btnToggleMode, modeBtnParams);
+		btnToggleMode.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					MyGLRenderer r = glView.getRenderer();
+					r.isEditMode = !r.isEditMode;
+					updateEditControlsVisibility(r.isEditMode);
+					if (!r.isEditMode && isControlPanelVisible) {
+						btnTogglePanel.performClick();
+					} 
+					else if (r.isEditMode && !isControlPanelVisible) {
+						btnTogglePanel.performClick();
+					}
+					glView.requestRender();
+					updateOverlayInfo();
+				}
+			});
 
         btnTogglePanel = new Button(this);
         btnTogglePanel.setText("▼");
@@ -228,6 +283,17 @@ public class MainActivity extends Activity {
             btnMainFab.setBackgroundTintList(null);
             btnMainFab.setStateListAnimator(null);
         }
+		
+        btnTogglePanel.setMinWidth(0);
+        btnTogglePanel.setMinimumWidth(0);
+        btnTogglePanel.setMinHeight(0);
+        btnTogglePanel.setMinimumHeight(0);
+
+        btnMainFab.setMinWidth(0);
+        btnMainFab.setMinimumWidth(0);
+        btnMainFab.setMinHeight(0);
+        btnMainFab.setMinimumHeight(0);
+		
 
         GradientDrawable fabGradient = new GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
@@ -254,6 +320,7 @@ public class MainActivity extends Activity {
 					toggleFloatingMenu();
 				}
 			});
+		
 
         btnTogglePanel.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -267,6 +334,7 @@ public class MainActivity extends Activity {
 					int bottomOffset = isControlPanelVisible ? (int) (145 * density) : 24;
 					groupParams.setMargins(0, 0, 24, bottomOffset);
 					fabGroupContainer.setLayoutParams(groupParams);
+					updateFabGroupPosition();
 				}
 			});
 
@@ -360,18 +428,6 @@ public class MainActivity extends Activity {
 				}
 			});
 
-        btnToggleMode = createGlassButton("EDIT", "#0072FF", "#00C6FF");
-        btnToggleMode.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					MyGLRenderer r = glView.getRenderer();
-					r.isEditMode = !r.isEditMode;
-					updateEditControlsVisibility(r.isEditMode);
-					glView.requestRender();
-					updateOverlayInfo();
-				}
-			});
-
         Button btnResetView = createGlassButton("Reset View", "#D0392B", "#E34C3C");
         final MyGLRenderer renderer = glView.getRenderer();
         btnResetView.setOnClickListener(new View.OnClickListener() {
@@ -442,7 +498,6 @@ public class MainActivity extends Activity {
         rowObj.addView(btnViewMode);
         rowObj.addView(btnTexActive);
         rowObj.addView(btnDelObj);
-        rowObj.addView(btnToggleMode);
 
         editControlsLayout = new LinearLayout(this);
         editControlsLayout.setOrientation(LinearLayout.VERTICAL);
@@ -551,6 +606,37 @@ public class MainActivity extends Activity {
         checkStoragePermission();
         updateOverlayInfo();
     }
+	
+	private void updateFabGroupPosition() {
+        if (fabGroupContainer == null || groupParams == null) return;
+
+        final float density = getResources().getDisplayMetrics().density;
+
+        if (!isControlPanelVisible || controlPanel == null || controlPanel.getVisibility() == View.GONE) {
+            // Panel disembunyikan -> turun ke dasar layar (margin 24px)
+            groupParams.setMargins(0, 0, 24, 24);
+            fabGroupContainer.setLayoutParams(groupParams);
+        } else {
+            // Tunggu controlPanel selesai menghitung tinggi barunya (1 baris vs 3 baris)
+            controlPanel.post(new Runnable() {
+					@Override
+					public void run() {
+						int panelHeight = controlPanel.getHeight();
+						// Jika height belum terukur pada frame pertama, gunakan estimasi
+						if (panelHeight <= 0) {
+							boolean isEdit = (glView != null && glView.getRenderer() != null && glView.getRenderer().isEditMode);
+							panelHeight = (int) ((isEdit ? 130 : 56) * density);
+						}
+						// Margin bawah panel (12px) + tinggi aktual panel + jarak 10dp di atasnya
+						int bottomOffset = 12 + panelHeight + (int) (10 * density);
+						groupParams.setMargins(0, 0, 24, bottomOffset);
+						fabGroupContainer.setLayoutParams(groupParams);
+					}
+				});
+        }
+    }
+	
+	
 
     private void enableFullscreen() {
         if (getActionBar() != null) {
@@ -641,28 +727,32 @@ public class MainActivity extends Activity {
     }
 
     private void updateEditControlsVisibility(boolean isEditMode) {
+        float radius = (44 * getResources().getDisplayMetrics().density) / 2f;
+
         if (isEditMode) {
             editControlsLayout.setVisibility(View.VISIBLE);
             btnToggleMode.setText("EDIT");
             GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{applyAlpha("#0072FF", 0x4D), applyAlpha("#00C6FF", 0x4D)}
+                new int[]{applyAlpha("#0072FF", 0x66), applyAlpha("#00C6FF", 0x66)}
             );
-            btnBg.setCornerRadius(12f);
-            btnBg.setStroke(1, Color.parseColor("#55FFFFFF"));
+            btnBg.setCornerRadius(radius);
+            btnBg.setStroke(2, Color.parseColor("#66FFFFFF"));
             btnToggleMode.setBackground(btnBg);
         } else {
             editControlsLayout.setVisibility(View.GONE);
             btnToggleMode.setText("VIEW");
             GradientDrawable btnBg = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{applyAlpha("#444450", 0x4D), applyAlpha("#2C2C35", 0x4D)}
+                new int[]{applyAlpha("#444450", 0x66), applyAlpha("#2C2C35", 0x66)}
             );
-            btnBg.setCornerRadius(12f);
-            btnBg.setStroke(1, Color.parseColor("#55FFFFFF"));
+            btnBg.setCornerRadius(radius);
+            btnBg.setStroke(2, Color.parseColor("#55FFFFFF"));
             btnToggleMode.setBackground(btnBg);
         }
+		updateFabGroupPosition();
     }
+	
 
     private FrameLayout createScrollableFloatingSubMenu() {
         FrameLayout container = new FrameLayout(this);
@@ -674,6 +764,8 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(16, 16, 16, 16);
+		float density = getResources().getDisplayMetrics().density;
+        panel.setMinimumWidth((int) (185 * density));
 
         GradientDrawable glassBg = new GradientDrawable();
         glassBg.setColor(Color.parseColor("#4418181F"));
@@ -781,7 +873,14 @@ public class MainActivity extends Activity {
     private void toggleFloatingMenu() {
         if (!isMenuExpanded) {
             floatingMenuContainer.setVisibility(View.VISIBLE);
-
+			
+			if (fabGroupContainer != null) {
+                fabGroupContainer.requestLayout();
+            }
+			if (btnToggleMode != null) {
+                btnToggleMode.setVisibility(View.GONE);
+				btnTogglePanel.setVisibility(View.GONE);
+            }
             AnimationSet animSet = new AnimationSet(true);
             animSet.setInterpolator(new AccelerateDecelerateInterpolator());
             animSet.setDuration(180);
@@ -815,7 +914,10 @@ public class MainActivity extends Activity {
 					}
 					@Override public void onAnimationRepeat(Animation animation) {}
 				});
-
+			if (btnToggleMode != null) {
+				btnToggleMode.setVisibility(View.VISIBLE);
+				btnTogglePanel.setVisibility(View.VISIBLE);
+			}
             floatingMenuContainer.startAnimation(animSet);
             btnMainFab.setText("⚙");
         }
@@ -1042,86 +1144,6 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_PICK_MTL);
     }
 
-    private Bitmap decodeBitmapSafe(Uri uri) {
-        try {
-            // 1. Coba decoder bawaan Android dulu
-            InputStream is = getContentResolver().openInputStream(uri);
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inScaled = false;
-            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
-            Bitmap bmp = BitmapFactory.decodeStream(is, null, options);
-            if (is != null) is.close();
-            if (bmp != null) return bmp;
-
-            // 2. Jika null (misal BMP 8-bit palette / header non-standar), baca manual byte BMP
-            InputStream rawIs = getContentResolver().openInputStream(uri);
-            if (rawIs == null) return null;
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = rawIs.read(buf)) != -1) baos.write(buf, 0, n);
-            rawIs.close();
-            byte[] data = baos.toByteArray();
-
-            if (data.length > 54 && data[0] == 'B' && data[1] == 'M') {
-                int dataOffset = (data[10] & 0xFF) | ((data[11] & 0xFF) << 8) | ((data[12] & 0xFF) << 16) | ((data[13] & 0xFF) << 24);
-                int width = (data[18] & 0xFF) | ((data[19] & 0xFF) << 8) | ((data[20] & 0xFF) << 16) | ((data[21] & 0xFF) << 24);
-                int height = (data[22] & 0xFF) | ((data[23] & 0xFF) << 8) | ((data[24] & 0xFF) << 16) | ((data[25] & 0xFF) << 24);
-                int bpp = (data[28] & 0xFF) | ((data[29] & 0xFF) << 8);
-
-                boolean topDown = height < 0;
-                int absH = Math.abs(height);
-                int[] pixels = new int[width * absH];
-
-                if (bpp == 24) {
-                    int rowSize = ((width * 3 + 3) / 4) * 4;
-                    for (int y = 0; y < absH; y++) {
-                        int srcY = topDown ? y : (absH - 1 - y);
-                        int rowStart = dataOffset + srcY * rowSize;
-                        for (int x = 0; x < width; x++) {
-                            int idx = rowStart + x * 3;
-                            if (idx + 2 < data.length) {
-                                int b = data[idx] & 0xFF;
-                                int g = data[idx + 1] & 0xFF;
-                                int r = data[idx + 2] & 0xFF;
-                                pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
-                            }
-                        }
-                    }
-                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
-                } else if (bpp == 8) {
-                    int headerSize = (data[14] & 0xFF) | ((data[15] & 0xFF) << 8) | ((data[16] & 0xFF) << 16) | ((data[17] & 0xFF) << 24);
-                    int paletteOffset = 14 + headerSize;
-                    int[] palette = new int[256];
-                    for (int i = 0; i < 256; i++) {
-                        int pIdx = paletteOffset + i * 4;
-                        if (pIdx + 2 < data.length) {
-                            int b = data[pIdx] & 0xFF;
-                            int g = data[pIdx + 1] & 0xFF;
-                            int r = data[pIdx + 2] & 0xFF;
-                            palette[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
-                        }
-                    }
-                    int rowSize = ((width + 3) / 4) * 4;
-                    for (int y = 0; y < absH; y++) {
-                        int srcY = topDown ? y : (absH - 1 - y);
-                        int rowStart = dataOffset + srcY * rowSize;
-                        for (int x = 0; x < width; x++) {
-                            int idx = rowStart + x;
-                            if (idx < data.length) {
-                                pixels[y * width + x] = palette[data[idx] & 0xFF];
-                            }
-                        }
-                    }
-                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -1132,7 +1154,7 @@ public class MainActivity extends Activity {
             if (requestCode == REQUEST_PICK_TEXTURE) {
                 try {
                     InputStream inputStream = getContentResolver().openInputStream(uri);
-                    final Bitmap bitmap = decodeBitmapSafe(uri);
+                    final Bitmap bitmap = glView.getRenderer().decodeBitmapSafe(uri);
                     if (inputStream != null) inputStream.close();
 
                     if (bitmap != null) {

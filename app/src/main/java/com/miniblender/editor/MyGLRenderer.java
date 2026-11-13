@@ -19,21 +19,21 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import android.content.*;
 import android.opengl.*;
+import android.net.*;
 
 public class MyGLRenderer implements GLSurfaceView.Renderer {
 
     private final Context context;
     private final List<EditorObject> objects = new ArrayList<>();
-	public static final int TOUCH_MODE_ROOM = 0;     // Rotasi Ruangan / Kamera
-	public static final int TOUCH_MODE_OBJ_ROT = 1;  // Rotasi Objek Aktif
-	public static final int TOUCH_MODE_OBJ_MOVE = 2; // Move / Geser Objek Aktif
+	public static final int TOUCH_MODE_ROOM = 0;  
+	public static final int TOUCH_MODE_OBJ_ROT = 1;  
+	public static final int TOUCH_MODE_OBJ_MOVE = 2; 
 
 	public int currentTouchMode = TOUCH_MODE_ROOM;
     public int activeObjectIndex = 0;
 
     private GridFloor gridFloor;
 
-    // Rotasi Ruangan / Kamera
     public float rotX = 25.0f;
     public float rotY = -45.0f;
     public float posX = 0.0f;
@@ -43,14 +43,14 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 	public int screeHeight =1;
 
     public boolean isEditMode = true;
-    public boolean isSingleViewMode = false; // false = View All, true = View Single
+    public boolean isSingleViewMode = false; 
 
 
     private boolean programShaderInitialized = false;
 
     private final float[] projectionMatrix = new float[16];
     private final float[] viewMatrix = new float[16];
-    //private final float[] modelMatrix = new float[16];
+    
     private final float[] mvpMatrix = new float[16];
 
     public MyGLRenderer(Context context) {
@@ -90,6 +90,10 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 		this.rotX = 0.0f;
 		this.rotY = 0.0f;
 		this.scaleFactor = 1.0f;
+		for(EditorObject obj:objects){
+			obj.resetView();
+		}
+		saveSceneToCache();
 	}
 
     public List<EditorObject> getObjects() { return objects; }
@@ -117,16 +121,15 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         if (rawPath == null || rawPath.isEmpty()) return "";
 
         try {
-            // Decode %3A -> ':' dan %2F -> '/'
+          
             String decoded = java.net.URLDecoder.decode(rawPath, "UTF-8");
 
-            // Jika formatnya content://.../document/primary:symbian/pys60_games/aventador.obj
             if (decoded.contains("primary:")) {
                 String relPath = decoded.substring(decoded.indexOf("primary:") + "primary:".length());
                 File realFile = new File(android.os.Environment.getExternalStorageDirectory(), relPath);
                 return realFile.getAbsolutePath();
             }
-            // Jika formatnya SD Card eksternal: /document/XXXX-XXXX:folder/file.obj
+           
             if (decoded.startsWith("content://") && decoded.contains(":")) {
                 String afterScheme = decoded.substring("content://".length());
                 if (afterScheme.contains(":")) {
@@ -135,7 +138,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
                     return "/storage/" + storageId + "/" + parts[1];
                 }
             }
-            // Jika formatnya file:///storage/...
+            
             if (decoded.startsWith("file://")) {
                 return new File(android.net.Uri.parse(decoded).getPath()).getAbsolutePath();
             }
@@ -207,7 +210,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             outDir[i]    = farWorld[i] - nearWorld[i];
         }
 
-        // Normalisasi vektor arah ray
+        
         float len = (float) Math.sqrt(outDir[0]*outDir[0] + outDir[1]*outDir[1] + outDir[2]*outDir[2]);
         if (len > 0.0001f) {
             outDir[0] /= len;
@@ -216,48 +219,78 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    // 2. Cek sentuhan pada semua objek (Kiri / Tengah / Kanan) & pilih yang terdekat
-    public int pickObjectAtTouch(float touchX, float touchY) {
-        if (objects == null || objects.isEmpty()) return -1;
+    
+	public int pickObjectAtTouch(float touchX, float touchY) {
+        if (objects == null || objects.isEmpty() || isSingleViewMode) return -1;
 
-        float[] rayOrigin = new float[3];
-        float[] rayDir = new float[3];
-        screenToWorldRay(touchX, touchY, rayOrigin, rayDir);
+        // 1. Susun roomMatrix yang SAMA PERSIS dengan onDrawFrame()
+        float[] roomMatrix = new float[16];
+        Matrix.setIdentityM(roomMatrix, 0);
+        Matrix.translateM(roomMatrix, 0, posX, posY, 0.0f);
+        Matrix.rotateM(roomMatrix, 0, rotX, 1.0f, 0.0f, 0.0f);
+        Matrix.rotateM(roomMatrix, 0, rotY, 0.0f, 1.0f, 0.0f);
 
         int hitIndex = -1;
-        float closestDist = Float.MAX_VALUE;
+        float minPixelDist = 85f; // Radius toleransi sentuhan jari (dalam pixel)
+
+        float[] modelMat = new float[16];
+        float[] tempMat = new float[16];
+        float[] mvpMat = new float[16];
+        float[] vVec = new float[4];
+        float[] clipVec = new float[4];
 
         for (int i = 0; i < objects.size(); i++) {
             EditorObject obj = objects.get(i);
-            // Posisi pusat objek di dunia 3D (sesuaikan dengan nama variabel posisi di EditorObject kamu)
-            float cx = obj.offsetX;
-            float cy = obj.offsetY;
-            float cz = obj.offsetZ;
-            float radius = 1.2f * Math.max(obj.scaleX, Math.max(obj.scaleY, obj.scaleZ));
+            if (obj == null || obj.mesh == null || obj.mesh.vertices.isEmpty()) continue;
 
-            // Hitung jarak terdekat pusat objek ke garis Ray
-            float ocX = cx - rayOrigin[0];
-            float ocY = cy - rayOrigin[1];
-            float ocZ = cz - rayOrigin[2];
+            // 2. Susun Model Matrix objek yang SAMA PERSIS dengan onDrawFrame()
+            System.arraycopy(roomMatrix, 0, modelMat, 0, 16);
+            Matrix.scaleM(modelMat, 0, scaleFactor, scaleFactor, scaleFactor);
+            Matrix.translateM(modelMat, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
 
-            float tca = ocX * rayDir[0] + ocY * rayDir[1] + ocZ * rayDir[2];
-            if (tca < 0) continue; // Objek berada di belakang kamera
+            if (obj.rotationMatrix[0] == 0f && obj.rotationMatrix[5] == 0f && obj.rotationMatrix[10] == 0f) {
+                Matrix.setIdentityM(obj.rotationMatrix, 0);
+            }
+            Matrix.multiplyMM(tempMat, 0, modelMat, 0, obj.rotationMatrix, 0);
+            System.arraycopy(tempMat, 0, modelMat, 0, 16);
+            Matrix.scaleM(modelMat, 0, obj.scaleX, obj.scaleY, obj.scaleZ);
 
-            float d2 = (ocX * ocX + ocY * ocY + ocZ * ocZ) - (tca * tca);
-            if (d2 <= radius * radius && tca < closestDist) {
-                closestDist = tca;
-                hitIndex = i;
+            // 3. Hitung MVP lengkap (Projection * View * Model)
+            Matrix.multiplyMM(tempMat, 0, viewMatrix, 0, modelMat, 0);
+            Matrix.multiplyMM(mvpMat, 0, projectionMatrix, 0, tempMat, 0);
+
+            // 4. Proyeksikan setiap vertex objek ke koordinat layar 2D
+            for (float[] v : obj.mesh.vertices) {
+                vVec[0] = v[0];
+                vVec[1] = v[1];
+                vVec[2] = v[2];
+                vVec[3] = 1.0f;
+
+                Matrix.multiplyMV(clipVec, 0, mvpMat, 0, vVec, 0);
+                if (clipVec[3] <= 0.001f) continue;
+
+                float ndcX = clipVec[0] / clipVec[3];
+                float ndcY = clipVec[1] / clipVec[3];
+
+                float sx = (ndcX + 1.0f) * 0.5f * screenWidth;
+                float sy = (1.0f - ndcY) * 0.5f * screeHeight;
+
+                float dist = (float) Math.hypot(touchX - sx, touchY - sy);
+                if (dist < minPixelDist) {
+                    minPixelDist = dist;
+                    hitIndex = i;
+                }
             }
         }
         return hitIndex;
     }
+	
 
-    // 3. Geser objek aktif mengikuti gerakan jari sejajar pandangan kamera
+
     public void dragActiveObjectOnScreen(float dxPixel, float dyPixel) {
         EditorObject active = getActiveObject();
         if (active == null) return;
 
-        // Ambil vektor Right & Up kamera dari mViewMatrix
         float rightX = viewMatrix[0];
         float rightY = viewMatrix[4];
         float rightZ = viewMatrix[8];
@@ -329,6 +362,10 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 			activeObj.mesh.lastMtlStatus="No MTL";
 			activeObj.modelPath="";
 			activeObj.mtlStatus="No MTL";
+			try{
+				File fcache=new File(activeObj.texturePath);
+				fcache.delete();
+			}catch(Exception e){}
 			
         }
 
@@ -417,6 +454,12 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 				obj.mesh.initShader(); 
 				obj.fromJSONObject(objJson);
 				objects.add(obj);
+				if(obj.texturePath!=""){
+					Uri uri=Uri.fromFile(new File(obj.texturePath));
+					Bitmap bitmap=decodeBitmapSafe(uri);
+					obj.pendingTextureBitmap = bitmap;
+					loadTextureForActiveObject(bitmap,obj.texturePath);
+				}
 			}
 
 			return activeIndex;
@@ -425,6 +468,164 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 			return 0;
 		}
 	}
+	public int uploadBitmapToGL(android.graphics.Bitmap bitmap) {
+        if (bitmap == null || bitmap.isRecycled()) return 0;
+
+        int[] textureHandle = new int[1];
+        android.opengl.GLES20.glGenTextures(1, textureHandle, 0);
+
+        if (textureHandle[0] != 0) {
+            android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, textureHandle[0]);
+
+            // Filtering & Wrapping standar agar tekstur tajam dan mendukung UV > 1.0
+            android.opengl.GLES20.glTexParameteri(
+                android.opengl.GLES20.GL_TEXTURE_2D,
+                android.opengl.GLES20.GL_TEXTURE_MIN_FILTER,
+                android.opengl.GLES20.GL_LINEAR
+            );
+            android.opengl.GLES20.glTexParameteri(
+                android.opengl.GLES20.GL_TEXTURE_2D,
+                android.opengl.GLES20.GL_TEXTURE_MAG_FILTER,
+                android.opengl.GLES20.GL_LINEAR
+            );
+            android.opengl.GLES20.glTexParameteri(
+                android.opengl.GLES20.GL_TEXTURE_2D,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_S,
+                android.opengl.GLES20.GL_REPEAT
+            );
+            android.opengl.GLES20.glTexParameteri(
+                android.opengl.GLES20.GL_TEXTURE_2D,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_T,
+                android.opengl.GLES20.GL_REPEAT
+            );
+
+            android.opengl.GLUtils.texImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
+            android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, 0);
+        }
+
+        return textureHandle[0];
+    }
+
+    public android.graphics.Bitmap loadBitmapFromPath(String path) {
+        if (path == null || path.isEmpty()) return null;
+        try {
+            android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+            opts.inScaled = false;
+            opts.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
+
+            if (path.startsWith("content://") && context != null) {
+                java.io.InputStream is = context.getContentResolver().openInputStream(android.net.Uri.parse(path));
+                if (is != null) {
+                    android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(is, null, opts);
+                    is.close();
+                    return bmp;
+                }
+            } else {
+                String cleanPath = path.startsWith("file://") ? path.substring(7) : path;
+                java.io.File file = new java.io.File(cleanPath);
+                if (file.exists()) {
+                    return android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+	
+	public void reloadAllTextures() {
+        if (objects == null) return;
+        for (EditorObject obj : objects) {
+            if (obj.pendingTextureBitmap != null && !obj.pendingTextureBitmap.isRecycled()) {
+                // Upload ulang bitmap yang masih ada di memori RAM ke GPU
+                obj.textureId = uploadBitmapToGL(obj.pendingTextureBitmap);
+            } else if (obj.texturePath != null && !obj.texturePath.isEmpty()) {
+                // Jika bitmap belum ada di RAM, decode ulang dari texturePath / cache lalu upload
+                Bitmap bmp = loadBitmapFromPath(obj.texturePath);
+                if (bmp != null) {
+                    obj.pendingTextureBitmap = bmp;
+                    obj.textureId = uploadBitmapToGL(bmp);
+                }
+            }
+        }
+    }
+	public Bitmap decodeBitmapSafe(Uri uri) {
+        try {
+            InputStream is = context.getContentResolver().openInputStream(uri);
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inScaled = false;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap bmp = BitmapFactory.decodeStream(is, null, options);
+            if (is != null) is.close();
+            if (bmp != null) return bmp;
+
+            InputStream rawIs = context.getContentResolver().openInputStream(uri);
+            if (rawIs == null) return null;
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = rawIs.read(buf)) != -1) baos.write(buf, 0, n);
+            rawIs.close();
+            byte[] data = baos.toByteArray();
+
+            if (data.length > 54 && data[0] == 'B' && data[1] == 'M') {
+                int dataOffset = (data[10] & 0xFF) | ((data[11] & 0xFF) << 8) | ((data[12] & 0xFF) << 16) | ((data[13] & 0xFF) << 24);
+                int width = (data[18] & 0xFF) | ((data[19] & 0xFF) << 8) | ((data[20] & 0xFF) << 16) | ((data[21] & 0xFF) << 24);
+                int height = (data[22] & 0xFF) | ((data[23] & 0xFF) << 8) | ((data[24] & 0xFF) << 16) | ((data[25] & 0xFF) << 24);
+                int bpp = (data[28] & 0xFF) | ((data[29] & 0xFF) << 8);
+
+                boolean topDown = height < 0;
+                int absH = Math.abs(height);
+                int[] pixels = new int[width * absH];
+
+                if (bpp == 24) {
+                    int rowSize = ((width * 3 + 3) / 4) * 4;
+                    for (int y = 0; y < absH; y++) {
+                        int srcY = topDown ? y : (absH - 1 - y);
+                        int rowStart = dataOffset + srcY * rowSize;
+                        for (int x = 0; x < width; x++) {
+                            int idx = rowStart + x * 3;
+                            if (idx + 2 < data.length) {
+                                int b = data[idx] & 0xFF;
+                                int g = data[idx + 1] & 0xFF;
+                                int r = data[idx + 2] & 0xFF;
+                                pixels[y * width + x] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                            }
+                        }
+                    }
+                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+                } else if (bpp == 8) {
+                    int headerSize = (data[14] & 0xFF) | ((data[15] & 0xFF) << 8) | ((data[16] & 0xFF) << 16) | ((data[17] & 0xFF) << 24);
+                    int paletteOffset = 14 + headerSize;
+                    int[] palette = new int[256];
+                    for (int i = 0; i < 256; i++) {
+                        int pIdx = paletteOffset + i * 4;
+                        if (pIdx + 2 < data.length) {
+                            int b = data[pIdx] & 0xFF;
+                            int g = data[pIdx + 1] & 0xFF;
+                            int r = data[pIdx + 2] & 0xFF;
+                            palette[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                        }
+                    }
+                    int rowSize = ((width + 3) / 4) * 4;
+                    for (int y = 0; y < absH; y++) {
+                        int srcY = topDown ? y : (absH - 1 - y);
+                        int rowStart = dataOffset + srcY * rowSize;
+                        for (int x = 0; x < width; x++) {
+                            int idx = rowStart + x;
+                            if (idx < data.length) {
+                                pixels[y * width + x] = palette[data[idx] & 0xFF];
+                            }
+                        }
+                    }
+                    return Bitmap.createBitmap(pixels, width, absH, Bitmap.Config.ARGB_8888);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
     public void extrudeActiveVertex(float offsetX, float offsetY, float offsetZ) {
         EditorObject active = getActiveObject();
         if (active != null) {
@@ -444,6 +645,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         }
         programShaderInitialized = true;
         gridFloor = new GridFloor();
+		reloadAllTextures();
     }
 
     @Override
@@ -522,38 +724,15 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
 					android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, obj.pendingTextureBitmap, 0);
 					GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
 				}
-
-				obj.pendingTextureBitmap.recycle();
-				obj.pendingTextureBitmap = null;
 			}
 
-            // Jika mode Single View aktif, sembunyikan objek lain
             if (isSingleViewMode && !isThisObjectActive) continue;
 
             float[] scratchModelMatrix = new float[16];
             float[] tempMatrix = new float[16];
+
             System.arraycopy(roomMatrix, 0, scratchModelMatrix, 0, 16);
             android.opengl.Matrix.scaleM(scratchModelMatrix, 0, scaleFactor, scaleFactor, scaleFactor);
-
-            // Posisi dan Rotasi Lokal masing-masing objek
-            android.opengl.Matrix.translateM(scratchModelMatrix, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
-            android.opengl.Matrix.rotateM(scratchModelMatrix, 0, obj.rotX, 1.0f, 0.0f, 0.0f);
-            android.opengl.Matrix.rotateM(scratchModelMatrix, 0, obj.rotY, 0.0f, 1.0f, 0.0f);
-
-            android.opengl.Matrix.multiplyMM(tempMatrix, 0, viewMatrix, 0, scratchModelMatrix, 0);
-            android.opengl.Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, tempMatrix, 0);
-			
-			Matrix.setIdentityM(scratchModelMatrix, 0);
-			Matrix.translateM(scratchModelMatrix, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
-
-			float[] tempMat = new float[16];
-			Matrix.multiplyMM(tempMat, 0, scratchModelMatrix, 0, obj.rotationMatrix, 0);
-			System.arraycopy(tempMat, 0, scratchModelMatrix, 0, 16);
-			
-            System.arraycopy(roomMatrix, 0, scratchModelMatrix, 0, 16);
-            android.opengl.Matrix.scaleM(scratchModelMatrix, 0, scaleFactor, scaleFactor, scaleFactor);
-
-            
             android.opengl.Matrix.translateM(scratchModelMatrix, 0, obj.offsetX, obj.offsetY, obj.offsetZ);
 
             if (obj.rotationMatrix[0] == 0f && obj.rotationMatrix[5] == 0f && obj.rotationMatrix[10] == 0f) {
@@ -562,14 +741,11 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             android.opengl.Matrix.multiplyMM(tempMatrix, 0, scratchModelMatrix, 0, obj.rotationMatrix, 0);
             System.arraycopy(tempMatrix, 0, scratchModelMatrix, 0, 16);
 
-            
+            android.opengl.Matrix.scaleM(scratchModelMatrix, 0, obj.scaleX, obj.scaleY, obj.scaleZ);
             android.opengl.Matrix.multiplyMM(tempMatrix, 0, viewMatrix, 0, scratchModelMatrix, 0);
             android.opengl.Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, tempMatrix, 0);
-			android.opengl.Matrix.scaleM(scratchModelMatrix, 0, obj.scaleX, obj.scaleY, obj.scaleZ);
-			
-			
+
             obj.mesh.draw(mvpMatrix, scratchModelMatrix, obj.textureId, obj.selectedVertexIndex, isEditMode && isThisObjectActive);
-			
         }
     }
 

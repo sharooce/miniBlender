@@ -25,9 +25,19 @@ public class EditorObject {
 	public transient android.graphics.Bitmap pendingTextureBitmap = null;
 	public transient MeshHistoryManager history = new MeshHistoryManager();
 	
+	public void resetView(){
+		this.offsetX = 0.0f;
+		this.offsetY = 0.0f;
+		this.offsetZ = 0.0f;
+		this.rotX = 0.0f;
+		this.rotY = 0.0f;
+		this.rotZ = 0.0f;
+		this.scaleX = 1.0f;
+		this.scaleY = 1.0f;
+		this.scaleZ = 1.0f;
+	}
 	
 	
-
     public EditorObject(String name) {
         this.name = name;
         this.mesh = new MeshModel();
@@ -43,7 +53,7 @@ public class EditorObject {
             boundingRadius = 1.0f;
             return;
         }
-        float maxDistSq = 0.25f; // Radius minimal 0.5f agar objek kecil tetap mudah disentuh
+        float maxDistSq = 0.25f; 
         for (float[] v : mesh.vertices) {
             float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
             if (d2 > maxDistSq) {
@@ -108,13 +118,9 @@ public class EditorObject {
 	}
 	
 
-    // ==========================================
-    // 1. FUNGSI SIMPAN OBJECT KE JSONOBJECT
-    // ==========================================
     public JSONObject toJSONObject() throws Exception {
         JSONObject root = new JSONObject();
 
-        // A. Simpan Atribut & Transformasi EditorObject
         root.put("name", name);
         root.put("offsetX", (double) offsetX);
         root.put("offsetY", (double) offsetY);
@@ -149,10 +155,9 @@ public class EditorObject {
 		for (int i = 0; i < 16; i++) {
 			rotMatArray.put(rotationMatrix[i]);
 		}
-		// B. Simpan Matrix
+		
 		root.put("rotationMatrix", rotMatArray);
 
-        // C. Simpan Mesh Vertices (v)
         JSONArray vArray = new JSONArray();
         for (float[] v : mesh.vertices) {
             JSONArray item = new JSONArray();
@@ -163,7 +168,6 @@ public class EditorObject {
         }
         root.put("vertices", vArray);
 
-        // D. Simpan UV Texture Coordinates (vt)
         JSONArray vtArray = new JSONArray();
         for (float[] vt : mesh.texCoords) {
             JSONArray item = new JSONArray();
@@ -173,7 +177,6 @@ public class EditorObject {
         }
         root.put("texCoords", vtArray);
 
-        // E. Simpan Normals (vn)
         JSONArray vnArray = new JSONArray();
         for (float[] vn : mesh.normals) {
             JSONArray item = new JSONArray();
@@ -184,7 +187,6 @@ public class EditorObject {
         }
         root.put("normals", vnArray);
 
-        // F. Simpan Triangles (f - vertex indices)
         JSONArray fArray = new JSONArray();
         for (int[] tri : mesh.triangles) {
             JSONArray item = new JSONArray();
@@ -195,7 +197,6 @@ public class EditorObject {
         }
         root.put("triangles", fArray);
 
-        // G. Simpan UV Triangles
         JSONArray uvFArray = new JSONArray();
         for (int[] uvTri : mesh.uvTriangles) {
             JSONArray item = new JSONArray();
@@ -206,7 +207,6 @@ public class EditorObject {
         }
         root.put("uvTriangles", uvFArray);
 
-        // H. Simpan Normal Triangles
         JSONArray normFArray = new JSONArray();
         for (int[] normTri : mesh.normalTriangles) {
             JSONArray item = new JSONArray();
@@ -216,16 +216,11 @@ public class EditorObject {
             normFArray.put(item);
         }
         root.put("normalTriangles", normFArray);
-
-        // I. Simpan Status Winding Mode Aktif
         root.put("isCCWMode", mesh.isCCWMode);
 
         return root;
     }
 
-    // ==========================================
-    // 2. FUNGSI MUAT OBJECT DARI JSONOBJECT
-    // ==========================================
     public void fromJSONObject(JSONObject root) throws Exception {
         mesh.vertices.clear();
         mesh.texCoords.clear();
@@ -234,7 +229,6 @@ public class EditorObject {
         mesh.uvTriangles.clear();
         mesh.normalTriangles.clear();
 
-        // A. Restore Atribut & Transformasi EditorObject
         this.name = root.optString("name", "Object");
         this.offsetX = (float) root.optDouble("offsetX", 0.0);
         this.offsetY = (float) root.optDouble("offsetY", 0.0);
@@ -269,7 +263,6 @@ public class EditorObject {
 			mesh.hasVertexColors = true;
 		}
 
-        // B. Baca Vertices
         if (root.has("vertices")) {
             JSONArray vArray = root.getJSONArray("vertices");
             for (int i = 0; i < vArray.length(); i++) {
@@ -282,7 +275,6 @@ public class EditorObject {
             }
         }
 
-        // C. Baca UV Coordinates
         if (root.has("texCoords")) {
             JSONArray vtArray = root.getJSONArray("texCoords");
             for (int i = 0; i < vtArray.length(); i++) {
@@ -294,7 +286,6 @@ public class EditorObject {
             }
         }
 
-        // D. Baca Normals (vn)
         if (root.has("normals")) {
             JSONArray vnArray = root.getJSONArray("normals");
             for (int i = 0; i < vnArray.length(); i++) {
@@ -307,7 +298,6 @@ public class EditorObject {
             }
         }
 
-        // E. Baca Vertex Triangles
         if (root.has("triangles")) {
             JSONArray fArray = root.getJSONArray("triangles");
             for (int i = 0; i < fArray.length(); i++) {
@@ -320,7 +310,6 @@ public class EditorObject {
             }
         }
 
-        // F. Baca UV Triangles
         if (root.has("uvTriangles")) {
             JSONArray uvFArray = root.getJSONArray("uvTriangles");
             for (int i = 0; i < uvFArray.length(); i++) {
@@ -333,7 +322,6 @@ public class EditorObject {
             }
         }
 
-        // G. Baca Normal Triangles
         if (root.has("normalTriangles")) {
             JSONArray normFArray = root.getJSONArray("normalTriangles");
             for (int i = 0; i < normFArray.length(); i++) {
@@ -356,7 +344,6 @@ public class EditorObject {
 			}
 		}
 
-        // H. Restore Winding Mode
         if (root.has("isCCWMode")) {
             mesh.isCCWMode = root.getBoolean("isCCWMode");
         }
@@ -367,6 +354,9 @@ public class EditorObject {
         if (mesh.normals.isEmpty()) {
             mesh.recalculateNormals();
         }
+		if(root.get("texturePath")!=""){
+			texturePath=root.getString("texturePath");
+		}
 
         mesh.updateBuffers();
     }

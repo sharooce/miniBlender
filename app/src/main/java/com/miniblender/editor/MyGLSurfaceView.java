@@ -69,6 +69,21 @@ public class MyGLSurfaceView extends GLSurfaceView {
         }
         float focusX = sumX / pointerCount;
         float focusY = sumY / pointerCount;
+		
+		if (action == MotionEvent.ACTION_UP) {
+            float dx = Math.abs(event.getX() - focusX);
+            float dy = Math.abs(event.getY() - focusY);
+            if (dx < 15f && dy < 15f) {
+                int picked = renderer.pickObjectAtTouch(event.getX(), event.getY());
+                if (picked != -1 && picked != renderer.activeObjectIndex) {
+                    renderer.activeObjectIndex = picked;
+                    requestRender();
+                    if (getContext() instanceof MainActivity) {
+                        ((MainActivity) getContext()).updateOverlayInfo();
+                    }
+                }
+            }
+        }
 
         switch (action) {
             case MotionEvent.ACTION_DOWN:
