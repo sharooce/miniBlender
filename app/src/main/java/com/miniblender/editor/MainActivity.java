@@ -792,7 +792,7 @@ public class MainActivity extends Activity {
 			});
 
         // 3. Tombol Open Texture
-        Button btnLoadTex = createMenuButton("Open Texture BMP", "#16A085");
+        Button btnLoadTex = createMenuButton("Open Texture", "#16A085");
         btnLoadTex.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
@@ -837,9 +837,132 @@ public class MainActivity extends Activity {
         scrollView.addView(panel);
         container.addView(scrollView, new FrameLayout.LayoutParams(
 							  FrameLayout.LayoutParams.WRAP_CONTENT, maxHeight));
+							  
+		Button btnAbout = createMenuButton("About miniBlender", "#2A3B4C");
+        btnAbout.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					toggleFloatingMenu();
+					showAboutDialog();
+				}
+			});
+        panel.addView(btnAbout);
 
         return container;
     }
+	
+	private void showAboutDialog() {
+        float density = getResources().getDisplayMetrics().density;
+
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        }
+
+        // Container utama bergaya glassmorphism gelap (senada dengan overlayInfo)
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * density);
+        card.setPadding(pad, pad, pad, pad);
+
+        GradientDrawable cardBg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            new int[]{Color.parseColor("#E61C2026"), Color.parseColor("#E612151A")}
+        );
+        cardBg.setCornerRadius(18 * density);
+        cardBg.setStroke((int) (1.2f * density), Color.parseColor("#4400E5FF"));
+        card.setBackground(cardBg);
+
+        // Judul & Versi
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("❖ miniBlender v1.0");
+        tvTitle.setTextColor(Color.parseColor("#00E5FF"));
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        card.addView(tvTitle);
+
+        TextView tvSubtitle = new TextView(this);
+        tvSubtitle.setText("Lightweight Mobile 3D Mesh Editor & Viewer");
+        tvSubtitle.setTextColor(Color.parseColor("#B0BEC5"));
+        tvSubtitle.setTextSize(12f);
+        tvSubtitle.setPadding(0, (int) (2 * density), 0, (int) (12 * density));
+        card.addView(tvSubtitle);
+
+        // Garis pemisah tipis
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.parseColor("#33FFFFFF"));
+        LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, (int) (1 * density)
+        );
+        divParams.setMargins(0, 0, 0, (int) (12 * density));
+        card.addView(divider, divParams);
+
+        // Isi Detail: Fitur, Format, Desain & Developer
+        ScrollView scrollView = new ScrollView(this);
+        TextView tvBody = new TextView(this);
+        tvBody.setTextColor(Color.parseColor("#ECEFF1"));
+        tvBody.setTextSize(12.5f);
+        tvBody.setLineSpacing(4 * density, 1.0f);
+        tvBody.setText(
+            "FITUR UTAMA:\n" +
+            "• Multi-Format 3D Parser (.obj, .fbx Binary/ASCII, .glb, .stl, .ply, .3d, .mdl)\n" +
+            "• Direct Vertex Editing (Move, Remove, Undo/Redo)\n" +
+            "• Touch Raycast Object Picking, Orbit, Pan, Zoom & Object Transform\n" +
+            "• Custom Texture Mapping (BMP/PNG) & MTL Material Color\n" +
+            "• Export langsung ke format .3D, .MDL, dan Wavefront .OBJ\n\n" +
+            "DESAIN & ENGINE:\n" +
+            "• OpenGL ES 2.0 Custom Shader Pipeline & RGB Wireframe\n" +
+            "• Dark Glassmorphism Adaptive UI (Edit & View Mode)\n\n" +
+            "DEVELOPER:\n" +
+            "• Dikembangkan oleh Uce Sumarna. Developer (Ciamis, ID)\n" +
+            "• Dibangun khusus untuk modding game & workflow 3D mobile"
+        );
+        scrollView.addView(tvBody);
+
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            (int) (240 * density)
+        );
+        card.addView(scrollView, scrollParams);
+
+        // Tombol Tutup
+        Button btnClose = new Button(this);
+        btnClose.setText("Close");
+        btnClose.setTextColor(Color.WHITE);
+        btnClose.setTextSize(13f);
+        btnClose.setAllCaps(false);
+
+        GradientDrawable btnBg = new GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            new int[]{Color.parseColor("#0072FF"), Color.parseColor("#00C6FF")}
+        );
+        btnBg.setCornerRadius(22 * density);
+        btnClose.setBackground(btnBg);
+
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            (int) (40 * density)
+        );
+        btnParams.setMargins(0, (int) (14 * density), 0, 0);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					dialog.dismiss();
+				}
+			});
+        card.addView(btnClose, btnParams);
+
+        dialog.setContentView(card);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                (int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+        }
+        dialog.show();
+    }
+	
 
     private Button createMenuButton(String text, String hexAccentColor) {
         Button btn = new Button(this);
@@ -970,7 +1093,7 @@ public class MainActivity extends Activity {
         if (activeObj.texturePath != null && !activeObj.texturePath.isEmpty()) {
             sb.append(" | File: ").append(getCleanFileName(activeObj.texturePath));
         } else {
-            sb.append(" | File: [BELUM DIPILIH]");
+            sb.append(" | File: ");
         }
 
         if (r.isEditMode && totalVerts > 0 && activeObj.selectedVertexIndex >= 0 && activeObj.selectedVertexIndex < totalVerts) {

@@ -3,16 +3,25 @@ package com.miniblender.editor;
 import android.content.Context;
 import android.opengl.GLSurfaceView;
 import android.view.MotionEvent;
-import android.view.ScaleGestureDetector;
 
 public class MyGLSurfaceView extends GLSurfaceView {
 
     private final MyGLRenderer renderer;
-    private final ScaleGestureDetector scaleDetector;
 
-    private float lastX, lastY;
-    private boolean isZooming = false;
-	private boolean isMultiTouching = false;
+    private static final int TWO_FINGER_NONE = 0;
+    private static final int TWO_FINGER_ZOOM = 1;
+    private static final int TWO_FINGER_ROTATE_OBJ = 2;
+
+    private int twoFingerMode = TWO_FINGER_NONE;
+    private boolean isMultiTouching = false;
+
+    private float downX = 0f, downY = 0f;
+    private float lastX = 0f, lastY = 0f;
+
+    private float startMidX = 0f, startMidY = 0f;
+    private float startPinchDist = 0f;
+    private float prevMidX = 0f, prevMidY = 0f;
+    private float prevPinchDist = 0f;
 
     public MyGLSurfaceView(Context context) {
         super(context);
@@ -22,160 +31,164 @@ public class MyGLSurfaceView extends GLSurfaceView {
         setRenderer(renderer);
 
         setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
-
-        scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            @Override
-            public boolean onScale(ScaleGestureDetector detector) {
-                if (renderer != null) {
-                    renderer.scaleFactor *= detector.getScaleFactor();
-                    renderer.scaleFactor = Math.max(0.1f, Math.min(renderer.scaleFactor, 10.0f));
-                    requestRender();
-                }
-                return true;
-            }
-        });
     }
 
     public MyGLRenderer getRenderer() {
         return renderer;
     }
-	public void resetRoomView() {
-		renderer.rotX = 0.0f;
-		renderer.rotY = 0.0f;
-		renderer.scaleFactor = 1.0f;
-	}
 
-	public void zoomRoomIn() {
-		renderer.scaleFactor = Math.min(10.0f, renderer.scaleFactor * 1.2f);
-	}
+    public void resetRoomView() {
+        renderer.rotX = 0.0f;
+        renderer.rotY = 0.0f;
+        renderer.scaleFactor = 1.0f;
+    }
 
-	public void zoomRoomOut() {
-		renderer.scaleFactor = Math.max(0.1f, renderer.scaleFactor * 0.8f);
-	}
+    public void zoomRoomIn() {
+        renderer.scaleFactor = Math.min(10.0f, renderer.scaleFactor * 1.2f);
+    }
 
-	private float initialPinchSpan = 0f;
+    public void zoomRoomOut() {
+        renderer.scaleFactor = Math.max(0.1f, renderer.scaleFactor * 0.8f);
+    }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        scaleDetector.onTouchEvent(event);
+        if (renderer == null) return true;
 
-        int action = event.getAction() & MotionEvent.ACTION_MASK;
+        int action = event.getActionMasked();
         int pointerCount = event.getPointerCount();
-
-        float sumX = 0, sumY = 0;
-        for (int i = 0; i < pointerCount; i++) {
-            sumX += event.getX(i);
-            sumY += event.getY(i);
-        }
-        float focusX = sumX / pointerCount;
-        float focusY = sumY / pointerCount;
-		
-		if (action == MotionEvent.ACTION_UP) {
-            float dx = Math.abs(event.getX() - focusX);
-            float dy = Math.abs(event.getY() - focusY);
-            if (dx < 15f && dy < 15f) {
-                int picked = renderer.pickObjectAtTouch(event.getX(), event.getY());
-                if (picked != -1 && picked != renderer.activeObjectIndex) {
-                    renderer.activeObjectIndex = picked;
-                    requestRender();
-                    if (getContext() instanceof MainActivity) {
-                        ((MainActivity) getContext()).updateOverlayInfo();
-                    }
-                }
-            }
-        }
 
         switch (action) {
             case MotionEvent.ACTION_DOWN:
-                lastX = focusX;
-                lastY = focusY;
+                downX = lastX = event.getX();
+                downY = lastY = event.getY();
                 isMultiTouching = false;
-                initialPinchSpan = 0f;
+                twoFingerMode = TWO_FINGER_NONE;
                 break;
 
             case MotionEvent.ACTION_POINTER_DOWN:
-                lastX = focusX;
-                lastY = focusY;
                 isMultiTouching = true;
                 if (pointerCount == 2) {
-                    initialPinchSpan = scaleDetector.getCurrentSpan();
+                    twoFingerMode = TWO_FINGER_NONE;
+                    startMidX = prevMidX = (event.getX(0) + event.getX(1)) * 0.5f;
+                    startMidY = prevMidY = (event.getY(0) + event.getY(1)) * 0.5f;
+                    startPinchDist = prevPinchDist = (float) Math.hypot(
+                        event.getX(1) - event.getX(0),
+                        event.getY(1) - event.getY(0)
+                    );
                 }
                 break;
 
             case MotionEvent.ACTION_MOVE:
-                float dx = focusX - lastX;
-                float dy = focusY - lastY;
+                if (pointerCount == 1 && !isMultiTouching) {
+                    float x = event.getX();
+                    float y = event.getY();
+                    float dx = x - lastX;
+                    float dy = y - lastY;
 
-                if (renderer != null) {
-                    if (pointerCount == 1 && !isMultiTouching) {
-                        
-                        if (renderer.currentTouchMode == renderer.TOUCH_MODE_ROOM) {
-                            renderer.rotY += dx * 0.5f;
-                            renderer.rotX += dy * 0.5f;
-                        } 
-                        else if (renderer.currentTouchMode == renderer.TOUCH_MODE_OBJ_MOVE) {
-                            EditorObject active = renderer.getActiveObject();
-                            if (active != null) {
-                                
-                                float moveSpeed = 0.01f / Math.max(0.5f, renderer.scaleFactor);
-                                active.offsetX += dx * moveSpeed;
-                                active.offsetY -= dy * moveSpeed;
+                    if (renderer.currentTouchMode == MyGLRenderer.TOUCH_MODE_ROOM) {
+                        renderer.rotY += dx * 0.5f;
+                        renderer.rotX += dy * 0.5f;
+                    } else if (renderer.currentTouchMode == MyGLRenderer.TOUCH_MODE_OBJ_MOVE) {
+                        renderer.dragActiveObjectOnScreen(dx, dy);
+                    } else if (renderer.currentTouchMode == MyGLRenderer.TOUCH_MODE_OBJ_ROT) {
+                        renderer.rotateActiveObjectScreenAligned(dx, dy);
+                    }
+
+                    lastX = x;
+                    lastY = y;
+                    requestRender();
+
+                } else if (pointerCount == 2) {
+                    isMultiTouching = true;
+                    float curMidX = (event.getX(0) + event.getX(1)) * 0.5f;
+                    float curMidY = (event.getY(0) + event.getY(1)) * 0.5f;
+                    float curPinchDist = (float) Math.hypot(
+                        event.getX(1) - event.getX(0),
+                        event.getY(1) - event.getY(0)
+                    );
+
+                    if (twoFingerMode == TWO_FINGER_NONE) {
+                        float totalMoveMid = (float) Math.hypot(curMidX - startMidX, curMidY - startMidY);
+                        float totalDeltaDist = Math.abs(curPinchDist - startPinchDist);
+
+                        if (totalMoveMid > 14f || totalDeltaDist > 14f) {
+                            if (totalDeltaDist > totalMoveMid * 1.15f) {
+                                twoFingerMode = TWO_FINGER_ZOOM;
+                            } else {
+                                twoFingerMode = TWO_FINGER_ROTATE_OBJ;
                             }
-                        } 
-                        else if(renderer.currentTouchMode == renderer.TOUCH_MODE_OBJ_ROT) {
-                            renderer.rotateActiveObjectScreenAligned(dx, dy);
                         }
-                        requestRender();
-                    } 
-                    else if (pointerCount == 2) {
-                      
-                        float currentSpan = scaleDetector.getCurrentSpan();
-                        boolean isPinching = Math.abs(currentSpan - initialPinchSpan) > 25.0f;
+                    }
 
-                        if (!isPinching) {
-                            renderer.rotY += dx * 0.4f;
-                            renderer.rotX += dy * 0.4f;
+                    if (twoFingerMode == TWO_FINGER_ZOOM) {
+                        if (prevPinchDist > 10f) {
+                            float rawRatio = curPinchDist / prevPinchDist;
+                            rawRatio = Math.max(0.85f, Math.min(1.15f, rawRatio));
+                            renderer.scaleFactor = Math.max(0.1f, Math.min(10.0f, renderer.scaleFactor * rawRatio));
                             requestRender();
                         }
-                    } 
-                    else if (pointerCount >= 3) {
-                        
-                        renderer.rotY += dx * 0.4f;
-                        renderer.rotX += dy * 0.4f;
-                        renderer.rotateActiveObjectScreenAligned(dx, dy);
+                    } else if (twoFingerMode == TWO_FINGER_ROTATE_OBJ) {
+                        float dxMid = curMidX - prevMidX;
+                        float dyMid = curMidY - prevMidY;
+                        renderer.rotateActiveObjectScreenAligned(dxMid * 1.1f, dyMid * 1.1f);
                         requestRender();
                     }
-                }
 
-                lastX = focusX;
-                lastY = focusY;
+                    prevMidX = curMidX;
+                    prevMidY = curMidY;
+                    prevPinchDist = curPinchDist;
+
+                } else if (pointerCount >= 3) {
+                    float sumX = 0f, sumY = 0f;
+                    for (int i = 0; i < pointerCount; i++) {
+                        sumX += event.getX(i);
+                        sumY += event.getY(i);
+                    }
+                    float cx = sumX / pointerCount;
+                    float cy = sumY / pointerCount;
+                    renderer.rotY += (cx - lastX) * 0.4f;
+                    renderer.rotX += (cy - lastY) * 0.4f;
+                    lastX = cx;
+                    lastY = cy;
+                    requestRender();
+                }
                 break;
 
             case MotionEvent.ACTION_POINTER_UP:
-                int upIndex = event.getActionIndex();
-                if (pointerCount > 1) {
-                    float remX = 0, remY = 0;
-                    for (int i = 0; i < pointerCount; i++) {
-                        if (i == upIndex) continue;
-                        remX += event.getX(i);
-                        remY += event.getY(i);
-                    }
-                    lastX = remX / (pointerCount - 1);
-                    lastY = remY / (pointerCount - 1);
+                twoFingerMode = TWO_FINGER_NONE;
+                if (pointerCount == 2) {
+                    int remainingIdx = (event.getActionIndex() == 0) ? 1 : 0;
+                    lastX = event.getX(remainingIdx);
+                    lastY = event.getY(remainingIdx);
                 }
                 break;
 
             case MotionEvent.ACTION_UP:
+                
+                if (!isMultiTouching) {
+                    float moveDist = (float) Math.hypot(event.getX() - downX, event.getY() - downY);
+                    if (moveDist < 15f) {
+                        int picked = renderer.pickObjectAtTouch(event.getX(), event.getY());
+                        if (picked != -1 && picked != renderer.activeObjectIndex) {
+                            renderer.activeObjectIndex = picked;
+                            requestRender();
+                            if (getContext() instanceof MainActivity) {
+                                ((MainActivity) getContext()).updateOverlayInfo();
+                            }
+                        }
+                    }
+                }
+                isMultiTouching = false;
+                twoFingerMode = TWO_FINGER_NONE;
+                break;
+
             case MotionEvent.ACTION_CANCEL:
                 isMultiTouching = false;
-                initialPinchSpan = 0f;
-                lastX = focusX;
-                lastY = focusY;
+                twoFingerMode = TWO_FINGER_NONE;
                 break;
         }
         return true;
     }
-	
-	
-	
 }
+

@@ -45,7 +45,6 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
     public boolean isEditMode = true;
     public boolean isSingleViewMode = false; 
 
-
     private boolean programShaderInitialized = false;
 
     private final float[] projectionMatrix = new float[16];
@@ -165,7 +164,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         if (active != null && active.name.equalsIgnoreCase("Bodi Main") && objects.size() == 1) {
             active.name = objName;
             active.modelPath = realPath;
-            active.mesh.importFromFile(inputStream, objName, parentPath);
+			ModelParserLib.parseModel(inputStream, objName, parentPath, active.mesh);
+            //active.mesh.importFromFile(inputStream, objName, parentPath);
             active.mtlStatus = active.mesh.lastMtlStatus;
             if (programShaderInitialized) {
                 active.mesh.initShader();
@@ -174,7 +174,8 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         } else {
             EditorObject newObj = new EditorObject(objName);
             newObj.modelPath = realPath;
-            newObj.mesh.importFromFile(inputStream, objName, parentPath);
+			ModelParserLib.parseModel(inputStream, objName, parentPath, newObj.mesh);
+            //newObj.mesh.importFromFile(inputStream, objName, parentPath);
             newObj.mtlStatus = newObj.mesh.lastMtlStatus;
             if (programShaderInitialized) {
                 newObj.mesh.initShader();
@@ -642,6 +643,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
         for (EditorObject obj : objects) {
             obj.mesh.initShader();
             obj.mesh.updateBuffers();
+			obj.textureId = 0;
         }
         programShaderInitialized = true;
         gridFloor = new GridFloor();
@@ -696,15 +698,12 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             EditorObject obj = objects.get(i);
             boolean isThisObjectActive = (i == activeObjectIndex);
 			
-			if (obj.pendingTextureBitmap != null && !obj.pendingTextureBitmap.isRecycled()) {
+			if (obj.textureId <= 0 && obj.pendingTextureBitmap != null && !obj.pendingTextureBitmap.isRecycled()) {
 				GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1);
 				int[] textureHandles = new int[1];
 				GLES20.glGenTextures(1, textureHandles, 0);
 
 				if (textureHandles[0] != 0) {
-					if (obj.textureId > 0) {
-						GLES20.glDeleteTextures(1, new int[]{obj.textureId}, 0);
-					}
 					obj.textureId = textureHandles[0];
 					if (context instanceof MainActivity) {
 						((MainActivity) context).runOnUiThread(new Runnable() {
@@ -769,6 +768,7 @@ public class MyGLRenderer implements GLSurfaceView.Renderer {
             active.pendingTextureBitmap.recycle();
         }
         active.pendingTextureBitmap = flippedBitmap;
+		active.textureId = 0;
         if (texturePath != null) {
             active.texturePath = texturePath;
         }
